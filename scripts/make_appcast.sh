@@ -19,7 +19,7 @@ VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.pl
 BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Info.plist)
 SPARKLE_VERSION=2.10.0
 CACHE="${HOME}/.cache/lapse-sparkle-${SPARKLE_VERSION}"
-SIGN=$(find "$CACHE" -name sign_update -type f -print -quit)
+SIGN="$CACHE/bin/sign_update"
 if [[ -z "$SIGN" ]]; then
   echo "sign_update not found. Run ./build.sh once so Sparkle is downloaded." >&2
   exit 1

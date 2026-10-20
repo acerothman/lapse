@@ -26,8 +26,15 @@ if ! find "$SPARKLE_CACHE" -name Sparkle.framework -type d -print -quit 2>/dev/n
     "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
   tar -xJf "$SPARKLE_CACHE/sparkle.tar.xz" -C "$SPARKLE_CACHE"
 fi
-FRAMEWORK=$(find "$SPARKLE_CACHE" -name Sparkle.framework -type d -print -quit)
+# The tarball also nests a Sparkle.framework inside the test app, and that copy has no module map.
+FRAMEWORK="$SPARKLE_CACHE/Sparkle.framework"
+if [[ ! -e "$FRAMEWORK/Versions/B/Modules/module.modulemap" ]]; then
+  echo "Sparkle.framework module map not found in $SPARKLE_CACHE" >&2
+  find "$SPARKLE_CACHE" -name module.modulemap -print >&2 || true
+  exit 1
+fi
 FWDIR=$(dirname "$FRAMEWORK")
+echo "→ Sparkle at $FRAMEWORK"
 
 echo "→ Compiling ($TARGET)"
 swiftc -O -swift-version 5 -parse-as-library \
