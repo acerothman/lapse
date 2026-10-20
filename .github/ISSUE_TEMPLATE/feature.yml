@@ -1,0 +1,24 @@
+name: Feature
+description: A change you want in Lapse.
+title: ""
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing
+      description: The situation, not a design.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Sites, browsers, or limits this would affect.

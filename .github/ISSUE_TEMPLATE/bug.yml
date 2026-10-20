@@ -1,0 +1,36 @@
+name: Bug
+description: Lapse did something other than what you expected.
+title: ""
+labels:
+  - bug
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what Lapse did.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.6"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Safari, Chrome, Arc, Brave, Edge, or Vivaldi, if tracking is involved.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: A screenshot or the contents of ~/Library/Application Support/Lapse/data.json, with sites removed if you prefer.
