@@ -23,15 +23,20 @@ Screen Time is a long report. Lapse watches a short list of sites, keeps the tot
 
 ## Features
 
-- A welcome window the first time Lapse opens. Pick sites, set the daily limit, allow browser access and notifications, and leave open at login on. Settings has Welcome to Lapse if you want it again.
-- A popover with today's total, time and visits per site, and a chart of the last seven days.
-- A menu bar ring that fills clockwise through the day. Past the limit it becomes a red dot.
-- On a tracked site, the site's logo and a timer for the current visit (4:12, or 1:02:09 past an hour). Past the limit, the logo and the timer turn red.
-- An icon for sites you add, fetched from the site and cached locally.
-- A daily limit (1 h 30 min to start, from 15 min to 8 h) and a notification at 80% and at the limit, once each per day.
+- A welcome window the first time Lapse opens. Pick sites and apps, set the daily limit, allow browser access and notifications, and leave open at login on. Settings has Welcome to Lapse if you want it again.
+- A popover with today's total, time and visits per site and app, and a chart of the last seven days.
+- A menu bar ring that fills clockwise through the day. It follows the overall limit. Past the limit it becomes a red dot.
+- On a tracked site, the site's logo and a timer for the current visit (4:12, or 1:02:09 past an hour). On a tracked app, the app's own icon. Past the limit, the icon and the timer turn red.
+- An icon for sites you add, fetched from the site and cached locally. App icons come from the app on your Mac.
+- A daily limit (1 h 30 min to start, from 15 min to 8 h) and a notification at 80% and at the limit, once each per day. Each site and app can have its own limit too.
+- A calm screen when a site or app passes its limit. Snooze it for 5 or 15 minutes, or turn it off for the day. Settings can turn that screen off.
+- Focus hours on the days and times you choose. A stricter limit during that window, or a block for the whole window.
+- Check for updates from the menu bar or the popover. Lapse also checks on its own.
 - Open at login.
 
 It starts with X, Instagram, TikTok, YouTube, and Reddit turned on. Facebook, Threads, LinkedIn, Snapchat, and Twitch are in the list as well. Add any other domain, or right-click a site to remove it. Built-in logos are from Simple Icons (CC0).
+
+Apps start off. X, Discord, Slack, and Messages are listed. Turn one on, or add any other app. Time counts while that app is in front.
 
 ## Screenshots
 
@@ -59,7 +64,7 @@ The menu bar shows one thing at a time. A ring while you are not on a tracked si
   <a href="https://github.com/acerothman/lapse/releases/latest"><img alt="Download" src="https://img.shields.io/static/v1?label=&message=Download&color=111111&style=for-the-badge"></a>
 </p>
 
-Unzip `Lapse-1.0.0.zip` and move `Lapse.app` to your Applications folder.
+Unzip `Lapse-1.1.0.zip` and move `Lapse.app` to your Applications folder. Newer builds can install themselves from Check for updates.
 
 The build is ad hoc signed, not notarized, so a normal double-click is blocked. Right-click the app, choose **Open**, then **Open** again. Or clear the quarantine flag:
 
@@ -69,9 +74,9 @@ xattr -dr com.apple.quarantine /path/to/Lapse.app
 
 ## Privacy
 
-Usage stays in `~/Library/Application Support/Lapse/data.json`: settings, seconds per site per day, and visit counts. Days older than 90 are dropped. Icons for sites you add are PNGs in the `icons` folder next to that file. Delete the `Lapse` folder to reset.
+Usage stays in `~/Library/Application Support/Lapse/data.json`: settings, seconds per site or app per day, and visit counts. Days older than 90 are dropped. Icons for sites you add are PNGs in the `icons` folder next to that file. App icons are read from the apps themselves and are not saved. Delete the `Lapse` folder to reset.
 
-Lapse has no account, no analytics, and no server. The only network use is an icon for a site you added: the site's own `apple-touch-icon` and `icon` links, then `/favicon.ico`, then Google's favicon service if nothing else decodes. Removing a site deletes its cached icon.
+Lapse has no account and no analytics. It uses the network for two things: an icon for a site you added, and a check for a new version. The icon comes from the site's own `apple-touch-icon` and `icon` links, then `/favicon.ico`, then Google's favicon service if nothing else decodes. The update check reads the public release feed on GitHub. Removing a site deletes its cached icon.
 
 ## Permissions
 
@@ -81,7 +86,7 @@ Lapse has no account, no analytics, and no server. The only network use is an ic
 
 ## How tracking works
 
-About every two seconds, Lapse checks the frontmost app. While a tracked site is open it checks about once a second, so the visit timer stays current. In a supported browser it reads the active tab's address with AppleScript.
+About every two seconds, Lapse checks the frontmost app. While a tracked site or app is in front it checks about once a second, so the visit timer stays current. A tracked app counts by its bundle id. In a supported browser it reads the active tab's address with AppleScript.
 
 Time counts when that host matches an enabled site. Subdomains count: `old.reddit.com` counts for `reddit.com`.
 
@@ -123,7 +128,6 @@ cd lapse
 
 Not in this version:
 
-- A limit per site, in addition to the daily total.
 - A notarized download, so the Gatekeeper step above can go away.
 
 ## Contributing

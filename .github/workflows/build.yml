@@ -22,16 +22,46 @@ jobs:
         run: ./build.sh --no-open
 
       - name: Zip app
-        run: ditto -c -k --keepParent build/Lapse.app Lapse-1.0.0.zip
+        id: zip
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
+          NAME="Lapse-${VERSION}.zip"
+          ditto -c -k --keepParent build/Lapse.app "$NAME"
+          echo "file=$NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact=Lapse-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Lapse-1.0.0
-          path: Lapse-1.0.0.zip
+          name: ${{ steps.zip.outputs.artifact }}
+          path: ${{ steps.zip.outputs.file }}
+
+      - name: Sign update and write appcast
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_EDDSA_PRIVATE_KEY" ]; then
+            echo "SPARKLE_EDDSA_PRIVATE_KEY is not set. Skipping the signed appcast."
+            exit 0
+          fi
+          ./scripts/make_appcast.sh "${{ steps.zip.outputs.file }}"
+
+      - name: Upload appcast
+        if: hashFiles('appcast.xml') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: appcast.xml
+          path: appcast.xml
+
+      - name: Collect release files
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p release-files
+          cp Lapse-*.zip release-files/
+          if [ -f appcast.xml ]; then cp appcast.xml release-files/; fi
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: Lapse-1.0.0.zip
+          files: release-files/*

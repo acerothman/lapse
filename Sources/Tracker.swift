@@ -75,7 +75,7 @@ final class Tracker {
             sessionSiteID = nil
             sessionSeconds = 0
         }
-        let siteID = idle ? nil : currentSiteID()
+        let siteID = idle ? nil : currentTargetID()
 
         if let id = siteID {
             if id != lastSiteID { store.addVisit(to: id) }
@@ -112,10 +112,15 @@ final class Tracker {
         return idle >= Double(store.settings.idleThresholdSeconds)
     }
 
-    private func currentSiteID() -> String? {
+    /// A tracked Mac app wins over a browser tab. Otherwise, a supported browser's active site.
+    private func currentTargetID() -> String? {
         guard let app = NSWorkspace.shared.frontmostApplication,
-              let bid = app.bundleIdentifier,
-              let source = Self.browsers[bid] else { return nil }
+              let bid = app.bundleIdentifier else { return nil }
+        if store.app(for: bid) != nil {
+            if let icon = app.icon { store.rememberIcon(icon, for: bid) }
+            return bid
+        }
+        guard let source = Self.browsers[bid] else { return nil }
         guard let urlString = runScript(bid: bid, source: source),
               let host = URL(string: urlString)?.host else { return nil }
         return store.site(for: host)?.id
@@ -159,7 +164,9 @@ final class Tracker {
 
     private func checkLimit() {
         guard store.settings.notificationsEnabled else { return }
-        let total = store.todayTotal, limit = store.limitSeconds
+        if store.isFocusHours(), store.settings.focus.mode == .block { return }
+        let total = store.todayTotal, limit = store.overallLimitSeconds()
+        guard limit > 0 else { return }
         let today = store.today
         if total >= limit, !today.notifiedLimit {
             store.markNotified(warning: false)
