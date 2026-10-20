@@ -49,7 +49,10 @@ final class UpdateCheck: ObservableObject {
         let last = UserDefaults.standard.object(forKey: Self.lastKey) as? Date ?? Date()
         let wait = max(60, Self.day - Date().timeIntervalSince(last))
         let timer = Timer(timeInterval: wait, repeats: false) { [weak self] _ in
-            Task { @MainActor in await self?.checkIfDue() }
+            guard let checker = self else { return }
+            Task { @MainActor in
+                await checker.checkIfDue()
+            }
         }
         timer.tolerance = 60
         RunLoop.main.add(timer, forMode: .common)
