@@ -18,7 +18,6 @@ That writes `build/Lapse.app` and does not copy it to `~/Applications` or launch
 - Keep the usage log on the Mac. Do not add a network call other than the icon fetch for a site someone added.
 - The menu bar label, the popover, and Settings are the product. Say what changed on screen in the pull request.
 - The welcome window is `Sources/Onboarding.swift`. Its wording is approved. Don't rewrite those strings in passing.
-- The files in `docs/images/` and `docs/scrolltime-ad.mp4` still show the previous name. Leave them until new artwork is ready.
 
 ## Pull requests
 

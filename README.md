@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="112" alt="Lapse icon, a white hourglass on blue">
+  <img src="docs/lapse-icon.png" width="112" alt="Lapse icon">
 </p>
 
 <h1 align="center">Lapse</h1>
@@ -13,16 +13,9 @@
   <a href="https://github.com/acerothman/lapse/actions/workflows/build.yml"><img alt="Build status" src="https://github.com/acerothman/lapse/actions/workflows/build.yml/badge.svg"></a>
 </p>
 
-<!-- TODO: swap in Lapse-branded assets when they arrive.
-     docs/images/mockup-v4.png, docs/images/menubar-final.png,
-     docs/images/scrolltime-ad.gif, docs/images/ad-poster.png,
-     and docs/scrolltime-ad.mp4 still show the previous name. -->
-
 <p align="center">
-  <img src="docs/images/mockup-v4.png" width="880" alt="Popover with today's total, time per site, and a week chart, in light and dark">
+  <img src="docs/lapse-desktop.png" width="880" alt="Lapse on the desktop, with today's total and time per site">
 </p>
-
-<p align="center"><em>The screenshots and the clip still show the previous name.</em></p>
 
 ## Why
 
@@ -33,24 +26,32 @@ Screen Time is a long report. Lapse watches a short list of sites, keeps the tot
 - A welcome window the first time Lapse opens. Pick sites, set the daily limit, allow browser access and notifications, and leave open at login on. Settings has Welcome to Lapse if you want it again.
 - A popover with today's total, time and visits per site, and a chart of the last seven days.
 - A menu bar ring that fills clockwise through the day. Past the limit it becomes a red dot.
-- On a tracked site, the site's logo and a timer for the current visit (`4:12`, or `1:02:09` past an hour). Past the limit, the logo and the timer turn red.
+- On a tracked site, the site's logo and a timer for the current visit (4:12, or 1:02:09 past an hour). Past the limit, the logo and the timer turn red.
 - An icon for sites you add, fetched from the site and cached locally.
 - A daily limit (1 h 30 min to start, from 15 min to 8 h) and a notification at 80% and at the limit, once each per day.
 - Open at login.
 
 It starts with X, Instagram, TikTok, YouTube, and Reddit turned on. Facebook, Threads, LinkedIn, Snapchat, and Twitch are in the list as well. Add any other domain, or right-click a site to remove it. Built-in logos are from Simple Icons (CC0).
 
-<p align="center">
-  <img src="docs/images/menubar-final.png" width="720" alt="Menu bar states: ring filling through the day, red past the limit, and a logo with a session timer">
-</p>
-
-## Demo
+## Screenshots
 
 <p align="center">
-  <img src="docs/images/scrolltime-ad.gif" width="640" alt="Short clip of the menu bar ring and the popover">
+  <img src="docs/lapse-popover.png" width="340" alt="Lapse popover with today's total, sites, and the week">
 </p>
 
-The clip is also stored as [docs/scrolltime-ad.mp4](docs/scrolltime-ad.mp4). A still is at [docs/images/ad-poster.png](docs/images/ad-poster.png).
+<p align="center">
+  <img src="docs/lapse-onboarding.png" width="760" alt="Welcome window for choosing which sites to track">
+</p>
+
+The menu bar shows one thing at a time. A ring while you are not on a tracked site. The site's logo and a timer for this visit while you are.
+
+<p align="center">
+  <img src="docs/lapse-menubar-ring.png" width="720" alt="Menu bar with the daily progress ring">
+</p>
+
+<p align="center">
+  <img src="docs/lapse-menubar-timer.png" width="720" alt="Menu bar with the X logo and a session timer">
+</p>
 
 ## Download
 
@@ -124,7 +125,6 @@ Not in this version:
 
 - A limit per site, in addition to the daily total.
 - A notarized download, so the Gatekeeper step above can go away.
-- Screenshots and a clip that use the Lapse name.
 
 ## Contributing
 
