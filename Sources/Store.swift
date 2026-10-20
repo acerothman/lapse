@@ -104,8 +104,8 @@ final class Store: ObservableObject {
     }
 
     /// Why the soft block screen should be up, if it should. Only while a tracked site or app is in front.
-    /// Focus "block outright" still shows the screen when the limit screen is turned off.
     func softBlockReason(currentID: String?) -> SoftBlockReason? {
+        guard settings.softBlockEnabled else { return nil }
         let record = today
         if record.softBlockOff { return nil }
         if let until = record.snoozeUntil, until > Date() { return nil }
@@ -114,7 +114,6 @@ final class Store: ObservableObject {
         if isFocusHours(), settings.focus.mode == .block {
             return .focus(name: name)
         }
-        guard settings.softBlockEnabled else { return nil }
         if let cap = itemLimitSeconds(for: id), (today.seconds[id] ?? 0) >= cap {
             return .item(name: name, used: today.seconds[id] ?? 0, limit: cap)
         }

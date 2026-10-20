@@ -83,8 +83,8 @@ struct UsageBar: View {
 
 struct PopoverView: View {
     @ObservedObject var store: Store
+    @ObservedObject var updates: UpdateCheck
     let openSettings: () -> Void
-    let checkForUpdates: () -> Void
     let quit: () -> Void
 
     private static let dateFmt: DateFormatter = {
@@ -147,6 +147,21 @@ struct PopoverView: View {
             UsageBar(fraction: limit == 0 ? 1 : Double(total) / Double(max(limit, 1)), height: 5, color: over ? .red : .blue)
                 .padding(.top, 9)
 
+            if let version = updates.available {
+                HStack(spacing: 8) {
+                    Text("Lapse \(version) is out")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer(minLength: 8)
+                    Button("Download", action: updates.openDownload)
+                        .controlSize(.small)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.05)))
+                .padding(.top, 10)
+            }
+
             Divider().padding(.vertical, 10)
 
             // Sites
@@ -198,7 +213,9 @@ struct PopoverView: View {
             HStack {
                 Text("Version \(version)").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
-                Button("Check for updates", action: checkForUpdates)
+                Button("Check for updates") {
+                    updates.checkNow {}
+                }
                 Button("Settings…", action: openSettings)
                 Button("Quit", action: quit)
             }
@@ -444,7 +461,7 @@ struct SettingsView: View {
                         }
                     }
                     Text(store.settings.focus.mode == .block
-                         ? "Tracked sites and apps bring up the screen right away."
+                         ? "The screen comes up right away, unless you turned that screen off."
                          : "The menu bar ring uses this limit during the window.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

@@ -18,7 +18,7 @@ enum LapseMain {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let store = Store()
     lazy var tracker = Tracker(store: store)
-    private let updater = Updater()
+    private let updates = UpdateCheck()
     private lazy var softBlock = SoftBlockController(store: store)
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
@@ -49,8 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.animates = true
         popover.delegate = self
         let root = PopoverView(store: store,
+                               updates: updates,
                                openSettings: { [weak self] in self?.showSettings() },
-                               checkForUpdates: { [weak self] in self?.updater.check() },
                                quit: { NSApp.terminate(nil) })
         let host = NSHostingController(rootView: root)
         host.sizingOptions = [.preferredContentSize]
@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         tracker.start()
-        updater.start()
+        updates.start()
         if !store.settings.didFinishOnboarding {
             showOnboarding()
         }
@@ -107,7 +107,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func checkForUpdates(_ sender: Any?) {
-        updater.check()
+        updates.checkNow { [weak self] in
+            self?.showPopover()
+        }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem.button else { return }
+        if !popover.isShown {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
     }
 
     @objc private func openSettingsFromMenu(_ sender: Any?) {

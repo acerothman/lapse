@@ -64,7 +64,7 @@ The menu bar shows one thing at a time. A ring while you are not on a tracked si
   <a href="https://github.com/acerothman/lapse/releases/latest"><img alt="Download" src="https://img.shields.io/static/v1?label=&message=Download&color=111111&style=for-the-badge"></a>
 </p>
 
-Unzip `Lapse-1.1.0.zip` and move `Lapse.app` to your Applications folder. Newer builds can install themselves from Check for updates.
+Unzip `Lapse-1.1.0.zip` and move `Lapse.app` to your Applications folder. When a newer version is out, Lapse says so in the popover. Download stays on the releases page.
 
 The build is ad hoc signed, not notarized, so a normal double-click is blocked. Right-click the app, choose **Open**, then **Open** again. Or clear the quarantine flag:
 
@@ -76,7 +76,7 @@ xattr -dr com.apple.quarantine /path/to/Lapse.app
 
 Usage stays in `~/Library/Application Support/Lapse/data.json`: settings, seconds per site or app per day, and visit counts. Days older than 90 are dropped. Icons for sites you add are PNGs in the `icons` folder next to that file. App icons are read from the apps themselves and are not saved. Delete the `Lapse` folder to reset.
 
-Lapse has no account and no analytics. It uses the network for two things: an icon for a site you added, and a check for a new version. The icon comes from the site's own `apple-touch-icon` and `icon` links, then `/favicon.ico`, then Google's favicon service if nothing else decodes. The update check reads the public release feed on GitHub. Removing a site deletes its cached icon.
+Lapse has no account and no analytics. It uses the network for two things: an icon for a site you added, and a check for a new version. The icon comes from the site's own `apple-touch-icon` and `icon` links, then `/favicon.ico`, then Google's favicon service if nothing else decodes. The update check reads the latest release from GitHub, on launch and once a day. Removing a site deletes its cached icon.
 
 ## Permissions
 

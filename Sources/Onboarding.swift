@@ -141,7 +141,7 @@ struct OnboardingView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             stepHeader("Set a daily limit",
-                       "You'll get a heads up. Nothing gets blocked.")
+                       "You'll get a heads up, and a screen when you hit the limit.")
 
             VStack(spacing: 2) {
                 Text(Fmt.long(minutes * 60))

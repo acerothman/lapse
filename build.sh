@@ -15,33 +15,12 @@ TARGET="$ARCH-apple-macos13.0"
 
 echo "→ Cleaning"
 rm -rf "$BUILD"
-mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources" "$BUNDLE/Contents/Frameworks"
-
-SPARKLE_VERSION=2.10.0
-SPARKLE_CACHE="${HOME}/.cache/lapse-sparkle-${SPARKLE_VERSION}"
-if ! find "$SPARKLE_CACHE" -name Sparkle.framework -type d -print -quit 2>/dev/null | grep -q .; then
-  echo "→ Downloading Sparkle ${SPARKLE_VERSION}"
-  mkdir -p "$SPARKLE_CACHE"
-  curl -fsSL --retry 3 -o "$SPARKLE_CACHE/sparkle.tar.xz" \
-    "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
-  tar -xJf "$SPARKLE_CACHE/sparkle.tar.xz" -C "$SPARKLE_CACHE"
-fi
-# The tarball also nests a Sparkle.framework inside the test app, and that copy has no module map.
-FRAMEWORK="$SPARKLE_CACHE/Sparkle.framework"
-if [[ ! -e "$FRAMEWORK/Versions/B/Modules/module.modulemap" ]]; then
-  echo "Sparkle.framework module map not found in $SPARKLE_CACHE" >&2
-  find "$SPARKLE_CACHE" -name module.modulemap -print >&2 || true
-  exit 1
-fi
-FWDIR=$(dirname "$FRAMEWORK")
-echo "→ Sparkle at $FRAMEWORK"
+mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 
 echo "→ Compiling ($TARGET)"
 swiftc -O -swift-version 5 -parse-as-library \
   -target "$TARGET" \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-  -F "$FWDIR" -framework Sparkle \
-  -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
   -framework AppKit -framework SwiftUI -framework Charts \
   -framework ServiceManagement -framework UserNotifications \
   Sources/*.swift \
@@ -50,7 +29,6 @@ swiftc -O -swift-version 5 -parse-as-library \
 echo "→ Bundling resources"
 cp Info.plist "$BUNDLE/Contents/Info.plist"
 cp Resources/Icons/*.png "$BUNDLE/Contents/Resources/"
-cp -R "$FRAMEWORK" "$BUNDLE/Contents/Frameworks/"
 
 echo "→ Generating app icon"
 ICONSET="$BUILD/AppIcon.iconset"
@@ -63,8 +41,6 @@ done
 iconutil -c icns "$ICONSET" -o "$BUNDLE/Contents/Resources/AppIcon.icns"
 
 echo "→ Ad-hoc code signing"
-# Ad hoc only. Not notarized. --deep covers Sparkle's nested helper tools.
-codesign --force --deep --sign - "$BUNDLE/Contents/Frameworks/Sparkle.framework"
 codesign --force --deep --sign - "$BUNDLE"
 codesign --verify --verbose=1 "$BUNDLE"
 

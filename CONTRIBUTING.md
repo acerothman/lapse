@@ -15,10 +15,10 @@ That writes `build/Lapse.app` and does not copy it to `~/Applications` or launch
 ## Changes
 
 - Match the style of the file you are editing.
-- Keep the usage log on the Mac. Do not add a network call other than the icon fetch for a site someone added, and the Sparkle update check.
+- Keep the usage log on the Mac. Do not add a network call other than the icon fetch for a site someone added, and the update check against GitHub releases.
 - The menu bar label, the popover, and Settings are the product. Say what changed on screen in the pull request.
 - The welcome window is `Sources/Onboarding.swift`. Its wording is approved. Don't rewrite those strings in passing.
 
 ## Pull requests
 
-Open a pull request against `main` and fill in the template. CI on macOS 14 runs `./build.sh --no-open` and uploads `Lapse-1.1.0.zip`. A signed `appcast.xml` is added when the `SPARKLE_EDDSA_PRIVATE_KEY` Actions secret is set.
+Open a pull request against `main` and fill in the template. CI on macOS 14 runs `./build.sh --no-open` and uploads `Lapse-1.1.0.zip`.
