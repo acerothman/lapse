@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import ServiceManagement
 import UserNotifications
+import UniformTypeIdentifiers
 
 /// First-launch window. Shown once, and again from Settings.
 struct OnboardingView: View {
@@ -32,7 +33,8 @@ struct OnboardingView: View {
                 switch model.step {
                 case 0: welcome
                 case 1: sitesStep
-                case 2: limitStep
+                case 2: appsStep
+                case 3: limitStep
                 default: permissionsStep
                 }
             }
@@ -45,7 +47,12 @@ struct OnboardingView: View {
         .padding(.bottom, 16)
         .frame(width: 560, height: 512)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { model.refreshNotifications() }
+        .onAppear {
+            model.refreshNotifications()
+            for app in store.settings.apps {
+                _ = store.icon(forBundleID: app.id)
+            }
+        }
     }
 
     // MARK: Steps
@@ -106,6 +113,26 @@ struct OnboardingView: View {
         }
     }
 
+    private var appsStep: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            stepHeader("Which apps do you track?",
+                       "Time in these apps counts too. You can change this later.")
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(store.settings.apps) { app in
+                    appTile(app)
+                }
+                addAppTile
+            }
+            .padding(.top, 6)
+            .padding(.trailing, 4)
+
+            Text("\(store.settings.apps.filter(\.enabled).count) selected")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .padding(.top, 10)
+        }
+    }
+
     private var limitStep: some View {
         let minutes = store.settings.dailyLimitMinutes
         let limitBinding = Binding<Double>(
@@ -114,7 +141,7 @@ struct OnboardingView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             stepHeader("Set a daily limit",
-                       "You'll get a heads up. Nothing gets blocked.")
+                       "You'll get a heads up, and a screen when you hit the limit.")
 
             VStack(spacing: 2) {
                 Text(Fmt.long(minutes * 60))
@@ -226,7 +253,7 @@ struct OnboardingView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                ForEach(0..<4, id: \.self) { i in
+                ForEach(0..<5, id: \.self) { i in
                     Circle()
                         .fill(i == model.step ? Color.primary : Color.primary.opacity(0.22))
                         .frame(width: 6, height: 6)
@@ -246,7 +273,7 @@ struct OnboardingView: View {
     private var primaryTitle: String {
         switch model.step {
         case 0: return "Get Started"
-        case 3: return "Start Tracking"
+        case 4: return "Start Tracking"
         default: return "Continue"
         }
     }
@@ -367,6 +394,70 @@ struct OnboardingView: View {
         .buttonStyle(.plain)
     }
 
+    private func appTile(_ app: AppConfig) -> some View {
+        let on = app.enabled
+        return Button {
+            toggleApp(app.id)
+        } label: {
+            HStack(spacing: 6) {
+                AppIconView(image: store.appIcons[app.id], name: app.name, size: 16)
+                Text(app.name)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(on ? Color.accentColor : Color.primary.opacity(0.12),
+                                  lineWidth: on ? 1.5 : 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                if on {
+                    ZStack {
+                        Circle().fill(Color.accentColor)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 14, height: 14)
+                    .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var addAppTile: some View {
+        Button(action: addApp) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 16, height: 16)
+                Text("Add an app")
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private func mark(for site: SiteConfig) -> some View {
         if let name = site.icon,
@@ -435,6 +526,23 @@ struct OnboardingView: View {
         store.settings.sites[i].enabled.toggle()
     }
 
+    private func toggleApp(_ id: String) {
+        guard let i = store.settings.apps.firstIndex(where: { $0.id == id }) else { return }
+        store.settings.apps[i].enabled.toggle()
+    }
+
+    private func addApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add"
+        panel.message = "Choose a Mac app to track."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.addApp(at: url)
+    }
+
     private func commitAdd() {
         let raw = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
@@ -444,7 +552,7 @@ struct OnboardingView: View {
     }
 
     private func advance() {
-        if model.step < 3 {
+        if model.step < 4 {
             model.step += 1
         } else {
             model.applyLaunch(model.launchOn)

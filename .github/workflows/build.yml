@@ -22,16 +22,22 @@ jobs:
         run: ./build.sh --no-open
 
       - name: Zip app
-        run: ditto -c -k --keepParent build/Lapse.app Lapse-1.0.0.zip
+        id: zip
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
+          NAME="Lapse-${VERSION}.zip"
+          ditto -c -k --keepParent build/Lapse.app "$NAME"
+          echo "file=$NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact=Lapse-${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Lapse-1.0.0
-          path: Lapse-1.0.0.zip
+          name: ${{ steps.zip.outputs.artifact }}
+          path: ${{ steps.zip.outputs.file }}
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: Lapse-1.0.0.zip
+          files: ${{ steps.zip.outputs.file }}
