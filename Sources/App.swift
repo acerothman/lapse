@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import UserNotifications
 
 @main
 @MainActor
@@ -16,18 +17,22 @@ enum LapseMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    let store = Store()
+    let store = Store.shared
     lazy var tracker = Tracker(store: store)
     private let updates = UpdateCheck()
     private lazy var softBlock = SoftBlockController(store: store)
+    private lazy var friction = FrictionController(store: store)
+    private lazy var blocker = Blocker(store: store)
+    private lazy var endEarly = EndEarlyController(store: store)
+    private let settingsRouter = SettingsRouter()
+    private var lastAnnouncedPhase: SessionPhase?
+    private var pauseItem: NSMenuItem?
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var statusMenu: NSMenu?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var settingsObserver: AnyCancellable?
-    private var lastIdleRender = Date.distantPast
-    private var idleShown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.pruneOldDays()
@@ -43,35 +48,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         installStatusMenu()
-        updateLabel(force: true)
-
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
         let root = PopoverView(store: store,
                                updates: updates,
-                               openSettings: { [weak self] in self?.showSettings() },
-                               quit: { NSApp.terminate(nil) })
+                               openSettings: { [weak self] page in self?.showSettings(page) })
         let host = NSHostingController(rootView: root)
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
 
         tracker.onTick = { [weak self] in
-            self?.updateLabel()
-            self?.softBlock.sync()
+            self?.syncChrome()
+            self?.refreshFocusIfDue()
+        }
+        NotificationCenter.default.addObserver(forName: .lapseChrome, object: nil, queue: .main) { [weak self] _ in
+            guard let delegate = self else { return }
+            Task { @MainActor in delegate.syncChrome() }
         }
         // Re-draw right away when the limit or sites change in Settings.
         settingsObserver = store.$settings.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.updateLabel(force: true)
-                self?.softBlock.sync()
-            }
+            guard let delegate = self else { return }
+            Task { @MainActor in delegate.syncChrome() }
         }
         tracker.start()
         updates.start()
+        Task { await FocusBridge.refresh() }
         if !store.settings.didFinishOnboarding {
             showOnboarding()
         }
+        syncChrome()
     }
 
     private func installStatusMenu() {
@@ -79,6 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let check = NSMenuItem(title: "Check for updates", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         check.target = self
         menu.addItem(check)
+        let pause = NSMenuItem(title: "Pause tracking", action: #selector(togglePause(_:)), keyEquivalent: "")
+        pause.target = self
+        menu.addItem(pause)
+        pauseItem = pause
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu(_:)), keyEquivalent: ",")
         settings.target = self
@@ -97,13 +107,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    private var focusTicks = 0
+
+    private func refreshFocusIfDue() {
+        focusTicks += 1
+        guard focusTicks >= 15 else { return }
+        focusTicks = 0
+        Task { await FocusBridge.refresh() }
+    }
+
     private func showStatusMenu() {
         guard let menu = statusMenu, let button = statusItem.button else { return }
+        pauseItem?.title = store.settings.trackingPaused ? "Resume tracking" : "Pause tracking"
         statusItem.menu = menu
         button.performClick(nil)
         statusItem.menu = nil
         button.action = #selector(handleClick(_:))
         button.target = self
+    }
+
+    @objc private func togglePause(_ sender: Any?) {
+        store.settings.trackingPaused.toggle()
     }
 
     @objc private func checkForUpdates(_ sender: Any?) {
@@ -129,54 +153,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        blocker.restore()
         store.save()
     }
 
-    /// Active: redrawn every tick (1 s). Idle: the ring is redrawn at most every 30 s
-    /// (or immediately on a state change) to keep CPU use low.
-    private func updateLabel(force: Bool = false) {
-        guard let button = statusItem?.button else { return }
-        let total = store.todayTotal
-        let limit = store.limitSeconds
-        let over = limit == 0 || total >= limit
-
-        if let id = store.currentSiteID {
-            let itemOver = store.itemLimitSeconds(for: id).map { (store.today.seconds[id] ?? 0) >= $0 } ?? false
-            let activeOver = over || itemOver
-            if let site = store.settings.sites.first(where: { $0.id == id }) {
-                let glyph = StatusLabel.glyph(for: site, favicon: store.favicons[id])
-                button.image = StatusLabel.active(glyph: glyph,
-                                                  text: Fmt.session(Int(tracker.sessionSeconds)),
-                                                  over: activeOver,
-                                                  appearance: button.effectiveAppearance)
-                button.toolTip = "\(site.name), \(Fmt.session(Int(tracker.sessionSeconds))) this visit, \(Fmt.long(total)) today"
-                idleShown = false
-            } else if let app = store.settings.apps.first(where: { $0.id == id }) {
-                let icon = store.icon(forBundleID: id)
-                let glyph: (image: NSImage, template: Bool)? = icon.map { ($0, false) }
-                button.image = StatusLabel.active(glyph: glyph,
-                                                  text: Fmt.session(Int(tracker.sessionSeconds)),
-                                                  over: activeOver,
-                                                  appearance: button.effectiveAppearance)
-                button.toolTip = "\(app.name), \(Fmt.session(Int(tracker.sessionSeconds))) this visit, \(Fmt.long(total)) today"
-                idleShown = false
-            } else {
-                showRing(button, total: total, limit: limit, force: force)
-            }
-        } else {
-            showRing(button, total: total, limit: limit, force: force)
-        }
+    private func syncChrome() {
+        updateLabel()
+        blocker.sync()
+        endEarly.sync()
+        friction.sync()
+        softBlock.sync()
+        announcePhaseIfNeeded()
     }
 
-    private func showRing(_ button: NSStatusBarButton, total: Int, limit: Int, force: Bool) {
-            let now = Date()
-            guard force || !idleShown || now.timeIntervalSince(lastIdleRender) >= 30 else { return }
-            let fraction = limit == 0 ? 1.0 : Double(total) / Double(max(limit, 1))
-            button.image = StatusLabel.ring(fraction: fraction)
-            let cap = limit == 0 ? "no time during focus hours" : Fmt.long(limit)
-            button.toolTip = "\(Fmt.long(total)) of \(cap) today"
-            lastIdleRender = now
-            idleShown = true
+    private func announcePhaseIfNeeded() {
+        let phase = store.activeSession?.phase
+        let previous = lastAnnouncedPhase
+        lastAnnouncedPhase = phase
+        guard let phase, let previous, phase != previous, store.settings.notificationsEnabled else { return }
+        let content = UNMutableNotificationContent()
+        switch phase {
+        case .focus:
+            content.title = "Focus"
+            content.body = "\(store.settings.session.focusMinutes) minutes."
+        case .shortBreak:
+            content.title = "Break"
+            content.body = "\(store.settings.session.shortBreakMinutes) minutes."
+        case .longBreak:
+            content.title = "Break"
+            content.body = "\(store.settings.session.longBreakMinutes) minutes."
+        }
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+
+    /// Idle: a template timer symbol. During a session: a colored dot plus the countdown.
+    /// The countdown is button title, so the menu bar colors the digits. The dot is not a template.
+    private func updateLabel() {
+        guard let button = statusItem?.button else { return }
+        button.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        if let session = store.activeSession {
+            let onBreak = session.phase != .focus
+            let dot = StatusLabel.statusDot(onBreak: onBreak)
+            dot.isTemplate = false
+            button.image = dot
+            button.imagePosition = .imageLeading
+            button.title = Fmt.session(store.remainingSeconds())
+            let title = onBreak ? "Break" : (session.pausedRemaining == nil ? "Focus" : "Paused")
+            button.toolTip = "\(title), \(button.title)"
+            button.setAccessibilityLabel("Lapse, \(title), \(button.title)")
+            return
+        }
+        button.title = ""
+        button.imagePosition = .imageOnly
+        button.image = StatusLabel.timerIcon()
+        button.toolTip = store.settings.trackingPaused ? "Tracking is paused" : "Lapse"
+        button.setAccessibilityLabel("Lapse")
     }
 
     @objc private func togglePopover(_ sender: Any?) {
@@ -189,16 +222,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    func showSettings() {
+    func showSettings(_ page: SettingsPage = .general) {
         popover.performClose(nil)
+        settingsRouter.tab = page
         if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView(store: store, showWelcome: { [weak self] in
+            let host = NSHostingController(rootView: SettingsView(store: store, router: settingsRouter, showWelcome: { [weak self] in
                 self?.showOnboarding()
             }))
             let w = NSWindow(contentViewController: host)
-            w.title = "Lapse Settings"
-            w.styleMask = [.titled, .closable]
+            w.title = "Settings"
+            w.styleMask = [.titled, .closable, .miniaturizable]
             w.isReleasedWhenClosed = false
+            w.backgroundColor = .windowBackgroundColor
             w.center()
             settingsWindow = w
         }
@@ -213,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.onboardingWindow?.close()
         }
         let host = NSHostingController(rootView: root)
-        let size = NSSize(width: 560, height: 512)
+        let size = NSSize(width: 480, height: 360)
         if onboardingWindow == nil {
             let w = NSWindow(contentViewController: host)
             w.title = "Welcome to Lapse"

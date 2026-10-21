@@ -69,15 +69,34 @@ final class Tracker {
         let elapsed = min(max(now.timeIntervalSince(lastTick), 0), 5)
         lastTick = now
 
-        let idle = isAsleep || isIdle()
-        if idle {
-            // Going idle ends the visit.
+        let paused = store.settings.trackingPaused
+        let idleInput = isAsleep || isIdle() || paused
+        // A focus lock follows the front app even when the keyboard is still, so the block stays up.
+        let frontID = isAsleep ? nil : currentTargetID()
+        let locking = frontID != nil && store.isLocking(frontID!)
+        if idleInput && !locking {
             sessionSiteID = nil
             sessionSeconds = 0
         }
-        let siteID = idle ? nil : currentTargetID()
+        let siteID = (idleInput && !locking) ? nil : frontID
+        if siteID == nil {
+            store.clearFrictionVisit()
+        }
+        if locking {
+            store.suppressVisitFriction()
+        }
 
-        if let id = siteID {
+        let held = !locking && siteID != nil && siteID == store.frictionHoldID
+        let waiting = !locking && siteID != nil && !held && store.frictionClearedID != siteID && store.needsFriction(for: siteID!)
+        if waiting, let id = siteID {
+            store.presentFriction(for: id)
+        }
+
+        if locking {
+            carry = 0
+            sessionSiteID = nil
+            sessionSeconds = 0
+        } else if let id = siteID, !held, !waiting {
             if id != lastSiteID { store.addVisit(to: id) }
             if id != sessionSiteID || now.timeIntervalSince(sessionLastSeen) > Self.sessionGrace {
                 sessionSiteID = id
@@ -95,14 +114,20 @@ final class Tracker {
             checkLimit()
         } else {
             carry = 0
+            if held || waiting {
+                sessionSiteID = nil
+                sessionSeconds = 0
+            }
         }
         lastSiteID = siteID
         if store.currentSiteID != siteID { store.currentSiteID = siteID }
+        store.catchUpSession(now: now)
 
         ticksSinceSave += 1
-        if ticksSinceSave >= 30 { ticksSinceSave = 0; store.save() }   // ~30–60 s
+        if ticksSinceSave >= 30 { ticksSinceSave = 0; store.save() }   // about once a minute
         onTick?()
-        scheduleNext(after: siteID == nil ? 2 : 1)
+        let live = siteID != nil || store.activeSession != nil
+        scheduleNext(after: live ? 1 : 2)
     }
 
     private func isIdle() -> Bool {
@@ -122,8 +147,12 @@ final class Tracker {
         }
         guard let source = Self.browsers[bid] else { return nil }
         guard let urlString = runScript(bid: bid, source: source),
-              let host = URL(string: urlString)?.host else { return nil }
-        return store.site(for: host)?.id
+              let url = URL(string: urlString),
+              let host = url.host,
+              let site = store.site(for: host) else { return nil }
+        // During a focus the whole site is blocked, not just the feed.
+        if site.feedOnly, !store.sessionLocksApps, !FeedRules.isFeed(siteID: site.id, url: url) { return nil }
+        return site.id
     }
 
     private func runScript(bid: String, source: String) -> String? {
@@ -164,7 +193,7 @@ final class Tracker {
 
     private func checkLimit() {
         guard store.settings.notificationsEnabled else { return }
-        if store.isFocusHours(), store.settings.focus.mode == .block { return }
+        if store.isFocusHours(), store.activeFocusMode() == .block { return }
         let total = store.todayTotal, limit = store.overallLimitSeconds()
         guard limit > 0 else { return }
         let today = store.today
