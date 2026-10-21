@@ -29,9 +29,15 @@ struct SiteIcon: View {
     var size: CGFloat = 24
 
     private var bundled: NSImage? {
-        guard let name = site.icon,
-              let url = Bundle.main.url(forResource: name, withExtension: "png") else { return nil }
-        return NSImage(contentsOf: url)
+        guard let name = site.bundledIconName else { return nil }
+        let candidates = [
+            Bundle.main.url(forResource: name, withExtension: "png"),
+            Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "Icons")
+        ]
+        for url in candidates.compactMap({ $0 }) {
+            if let image = NSImage(contentsOf: url) { return image }
+        }
+        return nil
     }
 
     var body: some View {
@@ -39,20 +45,19 @@ struct SiteIcon: View {
         let glyph = bundled
         ZStack {
             if let glyph {
-                // Built-in site: white logo on its brand color.
+                // Built-in site: the bundled brand glyph on its brand color.
                 RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color(hex: site.colorHex))
                 Image(nsImage: glyph)
                     .resizable().interpolation(.high).aspectRatio(contentMode: .fit)
                     .frame(width: size * 0.54, height: size * 0.54)
             } else if let favicon {
-                // User-added site: full-color favicon on a white tile, like an app icon.
+                // User-added site: the fetched favicon. Letter tile only if that is missing too.
                 RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color(nsColor: .controlBackgroundColor))
                 Image(nsImage: favicon)
                     .resizable().interpolation(.high).aspectRatio(contentMode: .fit)
                     .frame(width: size * 0.7, height: size * 0.7)
             } else {
-                // Loading or failed: neutral letter tile.
-                RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color(hex: "#8E8E93"))
+                RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color(nsColor: .tertiaryLabelColor))
                 Text(site.name.prefix(1).uppercased())
                     .font(.system(size: size * 0.5, weight: .semibold))
                     .foregroundStyle(Color(nsColor: .controlBackgroundColor))

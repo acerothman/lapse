@@ -46,6 +46,12 @@ struct SiteConfig: Codable, Identifiable, Hashable {
         FeedRules.supports(siteID: id)
     }
 
+    /// Bundled Simple Icons glyph. A saved row that lost `icon` still uses the built-in mark.
+    var bundledIconName: String? {
+        if let icon, !icon.isEmpty { return icon }
+        return SiteConfig.defaults.first { $0.id == id }?.icon
+    }
+
     func matches(host: String) -> Bool {
         let h = host.lowercased()
         return domains.contains { d in h == d || h.hasSuffix("." + d) }
