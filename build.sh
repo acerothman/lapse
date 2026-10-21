@@ -21,7 +21,8 @@ echo "→ Compiling ($TARGET)"
 SDK="$(xcrun --show-sdk-path --sdk macosx)"
 CONST="$BUILD/Lapse.swiftconstvalues"
 compile_app() {
-  swiftc -O -swift-version 5 -parse-as-library \
+  swiftc -swift-version 5 -parse-as-library \
+    -module-name Lapse \
     -target "$TARGET" \
     -sdk "$SDK" \
     "$@" \
@@ -39,8 +40,9 @@ set -e
 if [[ $status -ne 0 ]]; then
   echo "const extraction unavailable, compiling without it"
   rm -f "$CONST"
-  compile_app
 fi
+# Ship an optimized binary. Const metadata comes from the compile above.
+compile_app -O
 
 echo "→ Bundling resources"
 cp Info.plist "$BUNDLE/Contents/Info.plist"
@@ -76,8 +78,7 @@ run_metadata() {
     --target-triple "$TARGET"
     --binary-file "$BUNDLE/Contents/MacOS/$APP"
     --deployment-target 13.0
-    --platform-family macOS
-    --bundle-identifier com.acerothman.lapse)
+    --platform-family macOS)
   if [[ -n "$XCODE_BUILD" ]]; then
     args+=(--xcode-version "$XCODE_BUILD")
   fi
@@ -104,6 +105,13 @@ if ! metadata_ready; then
 fi
 if ! metadata_ready; then
   echo "App Intents metadata was not written" >&2
+  if [[ -f "$CONST" ]]; then
+    echo "const values file: $(wc -c < "$CONST") bytes"
+    head -c 1500 "$CONST" || true
+    echo
+  else
+    echo "const values file was not produced"
+  fi
   exit 1
 fi
 

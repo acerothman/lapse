@@ -1,4 +1,12 @@
 [
+  "AppIntent",
+  "AppShortcutsProvider",
+  "AppEntity",
+  "TransientAppEntity",
+  "AppEnum",
+  "AppUnionValue",
+  "SetFocusFilterIntent",
+  "InstanceDisplayRepresentable",
   "AppIntents.AppIntent",
   "AppIntents.AppShortcutsProvider",
   "AppIntents.AppEntity",
@@ -6,6 +14,5 @@
   "AppIntents.AppEnum",
   "AppIntents.AppUnionValue",
   "AppIntents.SetFocusFilterIntent",
-  "AppIntents.AppIntent",
-  "SetFocusFilterIntent"
+  "AppIntents.InstanceDisplayRepresentable"
 ]
