@@ -205,17 +205,17 @@ enum FocusBridge {
 
 struct LapseShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        AppShortcut(intent: StartFocusIntent(), phrases: ["Start a session in \(\.applicationName)"],
+        AppShortcut(intent: StartFocusIntent(), phrases: ["Start a session in \(.applicationName)"],
                     shortTitle: "Start a session", systemImageName: "timer")
-        AppShortcut(intent: StopFocusIntent(), phrases: ["End a session in \(\.applicationName)"],
+        AppShortcut(intent: StopFocusIntent(), phrases: ["End a session in \(.applicationName)"],
                     shortTitle: "End a session", systemImageName: "stop.circle")
-        AppShortcut(intent: PauseTrackingIntent(), phrases: ["Pause tracking in \(\.applicationName)"],
+        AppShortcut(intent: PauseTrackingIntent(), phrases: ["Pause tracking in \(.applicationName)"],
                     shortTitle: "Pause tracking", systemImageName: "pause")
-        AppShortcut(intent: ResumeTrackingIntent(), phrases: ["Resume tracking in \(\.applicationName)"],
+        AppShortcut(intent: ResumeTrackingIntent(), phrases: ["Resume tracking in \(.applicationName)"],
                     shortTitle: "Resume tracking", systemImageName: "play")
-        AppShortcut(intent: TodayTimeIntent(), phrases: ["Today's time in \(\.applicationName)"],
+        AppShortcut(intent: TodayTimeIntent(), phrases: ["Today's time in \(.applicationName)"],
                     shortTitle: "Today's time", systemImageName: "clock")
-        AppShortcut(intent: SetLimitIntent(), phrases: ["Set a limit in \(\.applicationName)"],
+        AppShortcut(intent: SetLimitIntent(), phrases: ["Set a limit in \(.applicationName)"],
                     shortTitle: "Set a limit", systemImageName: "slider.horizontal.3")
     }
 }
