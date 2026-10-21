@@ -2,18 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Lapse</string>
-    <key>CFBundleDisplayName</key><string>Lapse</string>
-    <key>CFBundleIdentifier</key><string>com.acerothman.lapse</string>
-    <key>CFBundleExecutable</key><string>Lapse</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.1.0</string>
-    <key>CFBundleVersion</key><string>2</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
-    <key>LSUIElement</key><true/>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Lapse checks which site is open in your browser to count time on the sites you picked. Nothing leaves your Mac.</string>
+	<key>CFBundleDisplayName</key>
+	<string>Lapse</string>
+	<key>CFBundleExecutable</key>
+	<string>Lapse</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.acerothman.lapse</string>
+	<key>CFBundleName</key>
+	<string>Lapse</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.2.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.acerothman.lapse</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lapse</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Lapse checks which site is open in your browser to count time on the sites you picked. Nothing leaves your Mac.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>

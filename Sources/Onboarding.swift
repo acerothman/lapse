@@ -10,15 +10,18 @@ struct OnboardingView: View {
     var onFinish: () -> Void
     @StateObject private var model: OnboardingModel
 
-    init(store: Store, onFinish: @escaping () -> Void) {
+    static let size = NSSize(width: 600, height: 500)
+    private static let lastStep = 4
+
+    init(store: Store, startStep: Int = 0, onFinish: @escaping () -> Void) {
         self.store = store
         self.onFinish = onFinish
         let registered = SMAppService.mainApp.status == .enabled
         let on = store.settings.didFinishOnboarding ? registered : true
-        _model = StateObject(wrappedValue: OnboardingModel(launchOn: on))
+        _model = StateObject(wrappedValue: OnboardingModel(launchOn: on, step: startStep))
     }
 
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 108), spacing: 8), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 8), count: 3)
     private let presets: [(String, Int)] = [
         ("30 min", 30),
         ("1 h", 60),
@@ -38,14 +41,14 @@ struct OnboardingView: View {
                 default: permissionsStep
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: model.step == 0 ? .center : .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: model.step == 0 ? .center : .topLeading)
 
             footer
         }
-        .padding(.top, 36)
-        .padding(.horizontal, 24)
-        .padding(.bottom, 16)
-        .frame(width: 560, height: 512)
+        .padding(.top, 40)
+        .padding(.horizontal, 32)
+        .padding(.bottom, 20)
+        .frame(width: Self.size.width, height: Self.size.height)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             model.refreshNotifications()
@@ -58,42 +61,42 @@ struct OnboardingView: View {
     // MARK: Steps
 
     private var welcome: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 72, height: 72)
+                .frame(width: 80, height: 80)
             Text("Welcome to Lapse")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.3)
+                .padding(.top, 14)
             Text("Lapse shows how much time you spend on social media, right in your menu bar.")
                 .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
-            HStack(spacing: 6) {
-                Image(systemName: "lock.fill").font(.system(size: 10))
-                Text("Everything stays on your Mac.")
-                    .font(.system(size: 12))
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color.primary.opacity(0.06)))
+                .frame(maxWidth: 340)
+                .padding(.top, 6)
+            Label("Everything stays on your Mac.", systemImage: "lock")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faint)
+                .padding(.top, 18)
         }
+        .padding(.bottom, 20)
     }
 
     private var sitesStep: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let x = store.settings.sites.first(where: { $0.id == "x.com" })
+        return VStack(alignment: .leading, spacing: 0) {
             stepHeader("Which sites do you track?",
                        "Pick the ones you lose time on. You can change this later.")
-            LazyVGrid(columns: columns, spacing: 10) {
+            LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(store.settings.sites) { site in
-                    siteTile(site)
+                    tile(name: site.name, icon: .site(site, favicon: store.favicons[site.id]), on: site.enabled) {
+                        toggleSite(site.id)
+                    }
                 }
-                addTile
+                addTile("Add a site") { model.adding = true }
             }
-            .padding(.top, 6)
-            .padding(.trailing, 4)
 
             if model.adding {
                 HStack(spacing: 8) {
@@ -106,10 +109,16 @@ struct OnboardingView: View {
                 .padding(.top, 10)
             }
 
-            Text("\(store.settings.sites.filter(\.enabled).count) selected")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .padding(.top, 10)
+            HStack(spacing: 6) {
+                Text("\(store.settings.sites.filter(\.enabled).count) selected")
+                if let x, x.enabled, x.countsFeedOnly {
+                    Text("·")
+                    Text("X counts only its feed. Change that in Settings.")
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.muted)
+            .padding(.top, 12)
         }
     }
 
@@ -117,19 +126,19 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             stepHeader("Which apps do you track?",
                        "Time in these apps counts too. You can change this later.")
-            LazyVGrid(columns: columns, spacing: 10) {
+            LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(store.settings.apps) { app in
-                    appTile(app)
+                    tile(name: app.name, icon: .app(app, icon: store.appIcons[app.id]), on: app.enabled) {
+                        toggleApp(app.id)
+                    }
                 }
-                addAppTile
+                addTile("Add an app", action: addApp)
             }
-            .padding(.top, 6)
-            .padding(.trailing, 4)
 
             Text("\(store.settings.apps.filter(\.enabled).count) selected")
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .padding(.top, 10)
+                .foregroundStyle(Theme.muted)
+                .padding(.top, 12)
         }
     }
 
@@ -137,35 +146,33 @@ struct OnboardingView: View {
         let minutes = store.settings.dailyLimitMinutes
         let limitBinding = Binding<Double>(
             get: { Double(store.settings.dailyLimitMinutes) },
-            set: { store.settings.dailyLimitMinutes = Int($0) })
+            set: { store.settings.dailyLimitMinutes = GeneralPane.round15($0) })
 
         return VStack(alignment: .leading, spacing: 0) {
             stepHeader("Set a daily limit",
                        "You'll get a heads up, and a screen when you hit the limit.")
 
-            VStack(spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(Fmt.long(minutes * 60))
-                    .font(.system(size: 34, weight: .semibold))
-                    .monospacedDigit()
+                    .font(Theme.number(40))
+                    .tracking(-0.6)
+                    .contentTransition(.numericText())
+                    .animation(.default, value: minutes)
                 Text("per day, all sites combined")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.muted)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.04)))
 
-            HStack(spacing: 8) {
-                Text("15 min")
-                Slider(value: limitBinding, in: 15...480, step: 15)
-                Text("8 h")
+            Slider(value: limitBinding, in: 15...480) {
+                EmptyView()
+            } minimumValueLabel: {
+                Text("15 min").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            } maximumValueLabel: {
+                Text("8 h").font(.system(size: 11)).foregroundStyle(Theme.muted)
             }
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
             .padding(.top, 14)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(presets, id: \.1) { label, value in
                     let selected = minutes == value
                     Button(label) { store.settings.dailyLimitMinutes = value }
@@ -173,15 +180,9 @@ struct OnboardingView: View {
                         .font(.system(size: 12, weight: selected ? .semibold : .regular))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .foregroundStyle(selected ? Color.accentColor : Color.primary)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(selected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(selected ? Color.accentColor : Color.clear, lineWidth: 1)
-                        )
+                        .foregroundStyle(selected ? Color(nsColor: .windowBackgroundColor) : Theme.ink)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(selected ? Theme.ink : Theme.tile))
                 }
             }
             .padding(.top, 12)
@@ -191,337 +192,214 @@ struct OnboardingView: View {
                     Text("Notify me")
                         .font(.system(size: 13, weight: .medium))
                     Text("At 80% and when I hit the limit")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
                 }
                 Spacer()
                 Toggle("Notify me", isOn: $store.settings.notificationsEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.04)))
-            .padding(.top, 16)
+            .padding(.vertical, 12)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 0.5) }
+            .padding(.top, 24)
         }
     }
 
     private var permissionsStep: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             stepHeader("Two quick permissions",
                        "Your Mac will ask you to confirm each one.")
 
-            permissionRow(symbol: "safari", tint: .blue, title: "Browser access",
-                          detail: "Lets Lapse see which site you're on in Safari, Chrome, Arc and others. It only keeps the site name.") {
-                if model.browserAllowed {
-                    allowedMark
-                } else {
-                    Button("Allow") { model.browserAllowed = Tracker.promptForBrowserAutomation() }
-                        .controlSize(.small)
+            VStack(spacing: 0) {
+                permissionRow(symbol: "safari", title: "Browser access",
+                              detail: "Lets Lapse see which site you're on in Safari, Chrome, Arc and others. It only keeps the site name.") {
+                    if model.browserAllowed {
+                        allowedMark
+                    } else {
+                        Button("Allow") { model.browserAllowed = Tracker.promptForBrowserAutomation() }
+                    }
+                }
+                rowDivider
+                permissionRow(symbol: "bell", title: "Notifications",
+                              detail: "So you get a heads up near your limit.") {
+                    if model.notificationsAllowed {
+                        allowedMark
+                    } else {
+                        Button("Allow") { model.requestNotifications() }
+                    }
+                }
+                rowDivider
+                permissionRow(symbol: "power", title: "Open at login",
+                              detail: "Starts when your Mac does.") {
+                    Toggle("Open at login", isOn: $model.launchOn)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: model.launchOn) { on in model.applyLaunch(on) }
                 }
             }
-
-            permissionRow(symbol: "bell.fill", tint: .red, title: "Notifications",
-                          detail: "So you get a heads up near your limit.") {
-                if model.notificationsAllowed {
-                    allowedMark
-                } else {
-                    Button("Allow") { model.requestNotifications() }
-                        .controlSize(.small)
-                }
-            }
-
-            permissionRow(symbol: "power", tint: .secondary, title: "Open at login",
-                          detail: "Starts when your Mac does.") {
-                Toggle("Open at login", isOn: $model.launchOn)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .onChange(of: model.launchOn) { on in model.applyLaunch(on) }
-            }
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 0.5))
 
             HStack(alignment: .center, spacing: 12) {
                 Text("Look for this in your menu bar")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
                 Spacer(minLength: 8)
                 menuBarSample
             }
-            .padding(.top, 6)
+            .padding(.top, 18)
         }
+    }
+
+    private var rowDivider: some View {
+        Rectangle().fill(Theme.hairline).frame(height: 0.5).padding(.leading, 52)
     }
 
     private var footer: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                ForEach(0..<5, id: \.self) { i in
-                    Circle()
-                        .fill(i == model.step ? Color.primary : Color.primary.opacity(0.22))
-                        .frame(width: 6, height: 6)
-                }
+            if model.step > 0 {
+                Text("\(model.step) of \(Self.lastStep)")
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(Theme.faint)
             }
             Spacer()
             if model.step > 0 {
                 Button("Back") { model.step -= 1 }
+                    .controlSize(.large)
             }
             Button(primaryTitle) { advance() }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
         }
-        .padding(.top, 12)
+        .padding(.top, 16)
     }
 
     private var primaryTitle: String {
         switch model.step {
         case 0: return "Get Started"
-        case 4: return "Start Tracking"
+        case Self.lastStep: return "Start Tracking"
         default: return "Continue"
         }
     }
 
     private var allowedMark: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 11, weight: .semibold))
-            Text("Allowed")
-                .font(.system(size: 12))
-        }
-        .foregroundStyle(.secondary)
+        Label("Allowed", systemImage: "checkmark")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Theme.muted)
     }
 
+    /// The real ring from the menu bar, at 35%.
     private var menuBarSample: some View {
-        HStack(spacing: 6) {
-            ZStack {
-                Circle().stroke(Color.white, lineWidth: 1.4)
-                Circle()
-                    .trim(from: 0, to: 0.35)
-                    .stroke(Color.white, style: StrokeStyle(lineWidth: 3, lineCap: .butt))
-                    .rotationEffect(.degrees(-90))
-            }
-            .frame(width: 12, height: 12)
+        HStack(spacing: 8) {
+            Image(nsImage: StatusLabel.ring(fraction: 0.35))
+                .renderingMode(.template)
+                .foregroundStyle(.white)
             Text(Self.menuClock.string(from: Date()))
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(Capsule().fill(Color.black.opacity(0.86)))
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.black.opacity(0.85)))
     }
 
     private static let menuClock: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "EEE h:mm a"
+        f.setLocalizedDateFormatFromTemplate("EEEhmm")
         return f
     }()
 
     // MARK: Pieces
 
     private func stepHeader(_ title: String, _ body: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 22, weight: .semibold))
+                .tracking(-0.3)
             Text(body)
                 .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 14)
+        .padding(.bottom, 20)
     }
 
-    private func siteTile(_ site: SiteConfig) -> some View {
-        let on = site.enabled
-        return Button {
-            toggle(site.id)
-        } label: {
-            HStack(spacing: 6) {
-                mark(for: site)
-                Text(site.name)
-                    .font(.system(size: 13))
+    private func tile(name: String, icon: ItemIcon.Source, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                ItemIcon(source: icon, size: 22)
+                Text(name)
+                    .font(.system(size: 13, weight: on ? .medium : .regular))
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(on ? Theme.ink : Theme.faint)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(on ? Color.accentColor : Color.primary.opacity(0.12),
-                                  lineWidth: on ? 1.5 : 1)
-            )
-            .overlay(alignment: .topTrailing) {
-                if on {
-                    ZStack {
-                        Circle().fill(Color.accentColor)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 14, height: 14)
-                    .offset(x: 4, y: -4)
-                }
-            }
+            .padding(.horizontal, 10)
+            .frame(height: 42)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(on ? Theme.ink.opacity(0.85) : Theme.hairline, lineWidth: on ? 1.5 : 0.5))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(on ? "Selected" : "Not selected")
     }
 
-    private var addTile: some View {
-        Button {
-            model.adding = true
-        } label: {
-            HStack(spacing: 6) {
+    private func addTile(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 16, height: 16)
-                Text("Add a site")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 22, height: 22)
+                Text(title)
                     .font(.system(size: 13))
+                    .foregroundStyle(Theme.muted)
                     .lineLimit(1)
+                Spacer(minLength: 4)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-            )
+            .padding(.horizontal, 10)
+            .frame(height: 42)
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Theme.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func appTile(_ app: AppConfig) -> some View {
-        let on = app.enabled
-        return Button {
-            toggleApp(app.id)
-        } label: {
-            HStack(spacing: 6) {
-                AppIconView(image: store.appIcons[app.id], name: app.name, size: 16)
-                Text(app.name)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(on ? Color.accentColor : Color.primary.opacity(0.12),
-                                  lineWidth: on ? 1.5 : 1)
-            )
-            .overlay(alignment: .topTrailing) {
-                if on {
-                    ZStack {
-                        Circle().fill(Color.accentColor)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 14, height: 14)
-                    .offset(x: 4, y: -4)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var addAppTile: some View {
-        Button(action: addApp) {
-            HStack(spacing: 6) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 16, height: 16)
-                Text("Add an app")
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func mark(for site: SiteConfig) -> some View {
-        if let name = site.icon,
-           let url = Bundle.main.url(forResource: name, withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
-            Image(nsImage: image)
-                .resizable()
-                .renderingMode(.template)
-                .foregroundStyle(glyphColor(site.colorHex))
-                .frame(width: 16, height: 16)
-        } else if let favicon = store.favicons[site.id] {
-            Image(nsImage: favicon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 16, height: 16)
-        } else {
-            Text(String(site.name.prefix(1)))
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 16, height: 16)
-        }
-    }
-
-    private func permissionRow<Trailing: View>(symbol: String, tint: Color, title: String, detail: String,
+    private func permissionRow<Trailing: View>(symbol: String, title: String, detail: String,
                                                @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(tint))
-            VStack(alignment: .leading, spacing: 1) {
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.tile))
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
                 Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
             trailing()
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
     }
 
-    private func glyphColor(_ hex: String) -> Color {
-        lightHex(hex) ? .black : Color(hex: hex)
-    }
-
-    private func lightHex(_ hex: String) -> Bool {
-        var s = hex.trimmingCharacters(in: .whitespaces)
-        if s.hasPrefix("#") { s.removeFirst() }
-        var v: UInt64 = 0
-        Scanner(string: s).scanHexInt64(&v)
-        let r = Double((v >> 16) & 0xFF)
-        let g = Double((v >> 8) & 0xFF)
-        let b = Double(v & 0xFF)
-        return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.72
-    }
-
-    private func toggle(_ id: String) {
+    private func toggleSite(_ id: String) {
         guard let i = store.settings.sites.firstIndex(where: { $0.id == id }) else { return }
         store.settings.sites[i].enabled.toggle()
     }
@@ -537,6 +415,7 @@ struct OnboardingView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.prompt = "Add"
         panel.message = "Choose a Mac app to track."
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -552,7 +431,7 @@ struct OnboardingView: View {
     }
 
     private func advance() {
-        if model.step < 4 {
+        if model.step < Self.lastStep {
             model.step += 1
         } else {
             model.applyLaunch(model.launchOn)
@@ -562,15 +441,16 @@ struct OnboardingView: View {
 }
 
 private final class OnboardingModel: ObservableObject {
-    @Published var step = 0
+    @Published var step: Int
     @Published var notificationsAllowed = false
     @Published var browserAllowed = false
     @Published var launchOn: Bool
     @Published var adding = false
     @Published var draft = ""
 
-    init(launchOn: Bool) {
+    init(launchOn: Bool, step: Int) {
         self.launchOn = launchOn
+        self.step = step
     }
 
     func refreshNotifications() {

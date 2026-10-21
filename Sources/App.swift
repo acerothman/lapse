@@ -15,23 +15,26 @@ enum LapseMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    let store = Store()
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSMenuDelegate {
+    let store = Store.shared
     lazy var tracker = Tracker(store: store)
-    private let updates = UpdateCheck()
+    let updates = UpdateCheck()
     private lazy var softBlock = SoftBlockController(store: store)
-    private var statusItem: NSStatusItem!
-    private let popover = NSPopover()
-    private var statusMenu: NSMenu?
-    private var settingsWindow: NSWindow?
-    private var onboardingWindow: NSWindow?
-    private var settingsObserver: AnyCancellable?
+    private lazy var friction = FrictionController(store: store)
+    private(set) var statusItem: NSStatusItem!
+    let popover = NSPopover()
+    private let statusMenu = NSMenu()
+    private(set) var settingsController: SettingsWindowController?
+    private(set) var onboardingWindow: NSWindow?
+    private var observers = Set<AnyCancellable>()
     private var lastIdleRender = Date.distantPast
     private var idleShown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Scenes.applyAppearance()
         store.pruneOldDays()
         store.loadFavicons()
+        for app in store.settings.apps { _ = store.icon(forBundleID: app.id) }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -42,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.action = #selector(handleClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        installStatusMenu()
+        statusMenu.delegate = self
         updateLabel(force: true)
 
         popover.behavior = .transient
@@ -56,38 +59,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
 
+        tracker.gate = { [weak self] target in self?.friction.evaluate(target) ?? true }
         tracker.onTick = { [weak self] in
             self?.updateLabel()
             self?.softBlock.sync()
         }
-        // Re-draw right away when the limit or sites change in Settings.
-        settingsObserver = store.$settings.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async {
+        // Re-draw right away when settings, a pause or focus hours change, from here or from Shortcuts.
+        store.$settings.dropFirst().map { _ in () }
+            .merge(with: store.$state.dropFirst().map { _ in () })
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
                 self?.updateLabel(force: true)
                 self?.softBlock.sync()
             }
+            .store(in: &observers)
+
+        if Scenes.current != nil {
+            Scenes.run(self)
+            return
         }
         tracker.start()
         updates.start()
+        Task { await LapseFocusFilter.sync() }
         if !store.settings.didFinishOnboarding {
             showOnboarding()
         }
     }
 
-    private func installStatusMenu() {
-        let menu = NSMenu()
-        let check = NSMenuItem(title: "Check for updates", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
-        check.target = self
-        menu.addItem(check)
-        menu.addItem(.separator())
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu(_:)), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-        let quit = NSMenuItem(title: "Quit Lapse", action: #selector(quitFromMenu(_:)), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-        statusMenu = menu
-    }
+    // MARK: Status item
 
     @objc private func handleClick(_ sender: Any?) {
         if NSApp.currentEvent?.type == .rightMouseUp {
@@ -98,13 +97,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func showStatusMenu() {
-        guard let menu = statusMenu, let button = statusItem.button else { return }
-        statusItem.menu = menu
+        guard let button = statusItem.button else { return }
+        statusItem.menu = statusMenu
         button.performClick(nil)
         statusItem.menu = nil
         button.action = #selector(handleClick(_:))
         button.target = self
     }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        if store.isPaused {
+            menu.addItem(item("Resume Tracking", #selector(resumeFromMenu(_:))))
+        } else {
+            let pause = NSMenuItem(title: "Pause Tracking", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            for (title, minutes) in [("15 Minutes", 15), ("30 Minutes", 30), ("1 Hour", 60)] {
+                let i = item(title, #selector(pauseFromMenu(_:)))
+                i.tag = minutes
+                sub.addItem(i)
+            }
+            let tomorrow = item("Until Tomorrow", #selector(pauseFromMenu(_:)))
+            tomorrow.tag = -1
+            sub.addItem(tomorrow)
+            let open = item("Until I Resume", #selector(pauseFromMenu(_:)))
+            open.tag = 0
+            sub.addItem(open)
+            pause.submenu = sub
+            menu.addItem(pause)
+        }
+        if store.isFocusHours() {
+            menu.addItem(item("End Focus Hours", #selector(endFocusFromMenu(_:))))
+        } else {
+            let focus = NSMenuItem(title: "Start Focus Hours", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            for (title, minutes) in [("30 Minutes", 30), ("1 Hour", 60), ("2 Hours", 120), ("Until I End Them", 0)] {
+                let i = item(title, #selector(startFocusFromMenu(_:)))
+                i.tag = minutes
+                sub.addItem(i)
+            }
+            focus.submenu = sub
+            menu.addItem(focus)
+        }
+        menu.addItem(.separator())
+        menu.addItem(item("Check for Updates", #selector(checkForUpdates(_:))))
+        menu.addItem(.separator())
+        menu.addItem(item("Settings…", #selector(openSettingsFromMenu(_:)), key: ","))
+        menu.addItem(item("Quit Lapse", #selector(quitFromMenu(_:)), key: "q"))
+    }
+
+    private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        i.target = self
+        return i
+    }
+
+    @objc private func pauseFromMenu(_ sender: NSMenuItem) {
+        switch sender.tag {
+        case -1: store.pauseUntilTomorrow()
+        case 0: store.pause(minutes: nil)
+        default: store.pause(minutes: sender.tag)
+        }
+    }
+
+    @objc private func resumeFromMenu(_ sender: Any?) { store.resume() }
+
+    @objc private func startFocusFromMenu(_ sender: NSMenuItem) {
+        store.startFocus(minutes: sender.tag == 0 ? nil : sender.tag)
+    }
+
+    @objc private func endFocusFromMenu(_ sender: Any?) { store.stopFocus() }
 
     @objc private func checkForUpdates(_ sender: Any?) {
         updates.checkNow { [weak self] in
@@ -112,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    private func showPopover() {
+    func showPopover() {
         guard let button = statusItem.button else { return }
         if !popover.isShown {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -132,51 +194,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         store.save()
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { Links.handle(url, store: store) }
+    }
+
     /// Active: redrawn every tick (1 s). Idle: the ring is redrawn at most every 30 s
     /// (or immediately on a state change) to keep CPU use low.
-    private func updateLabel(force: Bool = false) {
+    func updateLabel(force: Bool = false) {
         guard let button = statusItem?.button else { return }
         let total = store.todayTotal
         let limit = store.limitSeconds
-        let over = limit == 0 || total >= limit
+
+        if let until = store.pausedUntil {
+            button.image = StatusLabel.paused()
+            button.toolTip = until == .distantFuture ? "Lapse is paused" : "Lapse is paused until \(Fmt.time(until))"
+            idleShown = false
+            return
+        }
 
         if let id = store.currentSiteID {
-            let itemOver = store.itemLimitSeconds(for: id).map { (store.today.seconds[id] ?? 0) >= $0 } ?? false
-            let activeOver = over || itemOver
+            let activeOver = store.isOver(id)
+            let session = Fmt.session(Int(tracker.sessionSeconds))
             if let site = store.settings.sites.first(where: { $0.id == id }) {
                 let glyph = StatusLabel.glyph(for: site, favicon: store.favicons[id])
-                button.image = StatusLabel.active(glyph: glyph,
-                                                  text: Fmt.session(Int(tracker.sessionSeconds)),
-                                                  over: activeOver,
+                button.image = StatusLabel.active(glyph: glyph, text: session, over: activeOver,
                                                   appearance: button.effectiveAppearance)
-                button.toolTip = "\(site.name), \(Fmt.session(Int(tracker.sessionSeconds))) this visit, \(Fmt.long(total)) today"
+                button.toolTip = "\(site.name), \(session) this visit, \(Fmt.long(total)) today"
                 idleShown = false
+                return
             } else if let app = store.settings.apps.first(where: { $0.id == id }) {
-                let icon = store.icon(forBundleID: id)
-                let glyph: (image: NSImage, template: Bool)? = icon.map { ($0, false) }
-                button.image = StatusLabel.active(glyph: glyph,
-                                                  text: Fmt.session(Int(tracker.sessionSeconds)),
-                                                  over: activeOver,
+                let glyph: (image: NSImage, template: Bool)? = store.icon(forBundleID: id).map { ($0, false) }
+                button.image = StatusLabel.active(glyph: glyph, text: session, over: activeOver,
                                                   appearance: button.effectiveAppearance)
-                button.toolTip = "\(app.name), \(Fmt.session(Int(tracker.sessionSeconds))) this visit, \(Fmt.long(total)) today"
+                button.toolTip = "\(app.name), \(session) this visit, \(Fmt.long(total)) today"
                 idleShown = false
-            } else {
-                showRing(button, total: total, limit: limit, force: force)
+                return
             }
-        } else {
-            showRing(button, total: total, limit: limit, force: force)
         }
+        showRing(button, total: total, limit: limit, force: force)
     }
 
     private func showRing(_ button: NSStatusBarButton, total: Int, limit: Int, force: Bool) {
-            let now = Date()
-            guard force || !idleShown || now.timeIntervalSince(lastIdleRender) >= 30 else { return }
-            let fraction = limit == 0 ? 1.0 : Double(total) / Double(max(limit, 1))
-            button.image = StatusLabel.ring(fraction: fraction)
-            let cap = limit == 0 ? "no time during focus hours" : Fmt.long(limit)
-            button.toolTip = "\(Fmt.long(total)) of \(cap) today"
-            lastIdleRender = now
-            idleShown = true
+        let now = Date()
+        guard force || !idleShown || now.timeIntervalSince(lastIdleRender) >= 30 else { return }
+        let fraction = limit == 0 ? 1.0 : Double(total) / Double(max(limit, 1))
+        button.image = StatusLabel.ring(fraction: fraction)
+        let cap = limit == 0 ? "no time during focus hours" : Fmt.long(limit)
+        button.toolTip = "\(Fmt.long(total)) of \(cap) today"
+        lastIdleRender = now
+        idleShown = true
     }
 
     @objc private func togglePopover(_ sender: Any?) {
@@ -189,31 +255,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    func showSettings() {
+    // MARK: Windows
+
+    func showSettings(tab: Int? = nil) {
         popover.performClose(nil)
-        if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView(store: store, showWelcome: { [weak self] in
+        if settingsController == nil {
+            settingsController = SettingsWindowController(store: store, updates: updates, showWelcome: { [weak self] in
                 self?.showOnboarding()
-            }))
-            let w = NSWindow(contentViewController: host)
-            w.title = "Lapse Settings"
-            w.styleMask = [.titled, .closable]
-            w.isReleasedWhenClosed = false
-            w.center()
-            settingsWindow = w
+            })
         }
+        if let tab { settingsController?.select(tab: tab) }
         NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsController?.showWindow(nil)
+        settingsController?.window?.makeKeyAndOrderFront(nil)
     }
 
-    func showOnboarding() {
-        let root = OnboardingView(store: store) { [weak self] in
+    func showOnboarding(step: Int = 0) {
+        let root = OnboardingView(store: store, startStep: step) { [weak self] in
             guard let self else { return }
             self.store.settings.didFinishOnboarding = true
             self.onboardingWindow?.close()
         }
         let host = NSHostingController(rootView: root)
-        let size = NSSize(width: 560, height: 512)
+        let size = OnboardingView.size
         if onboardingWindow == nil {
             let w = NSWindow(contentViewController: host)
             w.title = "Welcome to Lapse"

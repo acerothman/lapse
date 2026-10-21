@@ -6,9 +6,7 @@ import AppKit
 /// that doesn't (for example an SVG on systems that can't read it) is skipped.
 enum FaviconFetcher {
     static let cacheDir: URL = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Lapse", isDirectory: true)
-            .appendingPathComponent("icons", isDirectory: true)
+        let dir = Store.dataDirectory.appendingPathComponent("icons", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()

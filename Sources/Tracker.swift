@@ -2,6 +2,12 @@ import AppKit
 import CoreGraphics
 import UserNotifications
 
+/// Something tracked in front right now. `browser` is set for sites.
+struct Target: Equatable {
+    let id: String
+    let browser: String?
+}
+
 /// Polls the frontmost app every 2 s. If it is a supported browser, reads the active
 /// tab URL via AppleScript and credits the elapsed time to the matching site.
 final class Tracker {
@@ -21,11 +27,14 @@ final class Tracker {
     /// A visit continues if you come back to the same site within this many seconds.
     static let sessionGrace: TimeInterval = 30
     var onTick: (() -> Void)?
+    /// Asked before time counts. Return false to hold the target (the pause screen is up).
+    /// Called with nil when nothing tracked is in front.
+    var gate: ((Target?) -> Bool)?
 
     /// bundle id -> AppleScript returning the active tab URL
     static let browsers: [String: String] = [
-        "com.apple.Safari": #"tell application id "com.apple.Safari" to return URL of front document"#,
-        "com.apple.SafariTechnologyPreview": #"tell application id "com.apple.SafariTechnologyPreview" to return URL of front document"#,
+        "com.apple.Safari": safari("com.apple.Safari"),
+        "com.apple.SafariTechnologyPreview": safari("com.apple.SafariTechnologyPreview"),
         "com.google.Chrome": chromium("com.google.Chrome"),
         "com.google.Chrome.beta": chromium("com.google.Chrome.beta"),
         "com.brave.Browser": chromium("com.brave.Browser"),
@@ -33,6 +42,9 @@ final class Tracker {
         "com.vivaldi.Vivaldi": chromium("com.vivaldi.Vivaldi"),
         "company.thebrowser.Browser": chromium("company.thebrowser.Browser"), // Arc
     ]
+    private static func safari(_ id: String) -> String {
+        #"tell application id "\#(id)" to return URL of front document"#
+    }
     private static func chromium(_ id: String) -> String {
         #"tell application id "\#(id)" to return URL of active tab of front window"#
     }
@@ -75,7 +87,10 @@ final class Tracker {
             sessionSiteID = nil
             sessionSeconds = 0
         }
-        let siteID = idle ? nil : currentTargetID()
+        var target = (idle || store.isPaused) ? nil : currentTarget()
+        let watching = target != nil
+        if let gate, !gate(target) { target = nil }
+        let siteID = target?.id
 
         if let id = siteID {
             if id != lastSiteID { store.addVisit(to: id) }
@@ -98,11 +113,13 @@ final class Tracker {
         }
         lastSiteID = siteID
         if store.currentSiteID != siteID { store.currentSiteID = siteID }
+        let shown = siteID == nil ? 0 : Int(sessionSeconds)
+        if store.sessionSeconds != shown { store.sessionSeconds = shown }
 
         ticksSinceSave += 1
-        if ticksSinceSave >= 30 { ticksSinceSave = 0; store.save() }   // ~30–60 s
+        if ticksSinceSave >= 30 { ticksSinceSave = 0; store.save() }   // about 30 to 60 s
         onTick?()
-        scheduleNext(after: siteID == nil ? 2 : 1)
+        scheduleNext(after: watching ? 1 : 2)
     }
 
     private func isIdle() -> Bool {
@@ -113,17 +130,18 @@ final class Tracker {
     }
 
     /// A tracked Mac app wins over a browser tab. Otherwise, a supported browser's active site.
-    private func currentTargetID() -> String? {
+    private func currentTarget() -> Target? {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bid = app.bundleIdentifier else { return nil }
         if store.app(for: bid) != nil {
             if let icon = app.icon { store.rememberIcon(icon, for: bid) }
-            return bid
+            return Target(id: bid, browser: nil)
         }
         guard let source = Self.browsers[bid] else { return nil }
         guard let urlString = runScript(bid: bid, source: source),
-              let host = URL(string: urlString)?.host else { return nil }
-        return store.site(for: host)?.id
+              let url = URL(string: urlString),
+              let site = store.site(for: url) else { return nil }
+        return Target(id: site.id, browser: bid)
     }
 
     private func runScript(bid: String, source: String) -> String? {
@@ -137,6 +155,22 @@ final class Tracker {
         let result = script.executeAndReturnError(&err)
         if err != nil { return nil }   // no window, or Automation permission denied
         return result.stringValue
+    }
+
+    /// Closes the active tab in a supported browser. False if the browser refused or has no window.
+    static func closeActiveTab(in bid: String) -> Bool {
+        let source: String
+        if bid.hasPrefix("com.apple.Safari") {
+            source = #"tell application id "\#(bid)" to close current tab of front window"#
+        } else if browsers[bid] != nil {
+            source = #"tell application id "\#(bid)" to close active tab of front window"#
+        } else {
+            return false
+        }
+        guard let script = NSAppleScript(source: source) else { return false }
+        var err: NSDictionary?
+        _ = script.executeAndReturnError(&err)
+        return err == nil
     }
 
     /// Runs the tab-URL script so macOS shows the Automation prompt for one browser.
@@ -164,14 +198,14 @@ final class Tracker {
 
     private func checkLimit() {
         guard store.settings.notificationsEnabled else { return }
-        if store.isFocusHours(), store.settings.focus.mode == .block { return }
+        if store.isFocusHours(), store.focusMode == .block { return }
         let total = store.todayTotal, limit = store.overallLimitSeconds()
         guard limit > 0 else { return }
         let today = store.today
         if total >= limit, !today.notifiedLimit {
             store.markNotified(warning: false)
             notify(title: "Limit reached",
-                   body: "You hit your \(Fmt.long(limit)) limit for today.")
+                   body: "That's your \(Fmt.long(limit)) for today.")
         } else if total >= limit * 8 / 10, total < limit, !today.notifiedWarning {
             store.markNotified(warning: true)
             notify(title: "\(Fmt.long(limit - total)) left today",

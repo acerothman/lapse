@@ -4,7 +4,7 @@ import AppKit
 /// - Idle: a 14 pt ring whose pie fills clockwise with today / limit (template). Over the limit: solid system red.
 /// - On a site: the site's logo plus the live session timer in monospaced digits. Over the limit: red.
 enum StatusLabel {
-    static let height: CGFloat = 18                      // fits 22–24 pt menu bars
+    static let height: CGFloat = 18                      // fits 22 to 24 pt menu bars
     static let iconSide: CGFloat = 14
     static let gap: CGFloat = 4
     static let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -44,6 +44,28 @@ enum StatusLabel {
             return true
         }
         image.isTemplate = !over
+        return image
+    }
+
+    /// Tracking paused: the ring outline with two bars inside (template).
+    static func paused() -> NSImage {
+        let size = NSSize(width: iconSide + 2, height: height)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let d: CGFloat = 13
+            let rect = NSRect(x: (size.width - d) / 2, y: (size.height - d) / 2, width: d, height: d)
+            NSColor.black.set()
+            let outline = NSBezierPath(ovalIn: rect.insetBy(dx: 0.75, dy: 0.75))
+            outline.lineWidth = 1.5
+            outline.stroke()
+            let barW: CGFloat = 1.8, barH: CGFloat = 5.4, gap: CGFloat = 1.8
+            let y = rect.midY - barH / 2
+            NSBezierPath(roundedRect: NSRect(x: rect.midX - gap / 2 - barW, y: y, width: barW, height: barH),
+                         xRadius: 0.6, yRadius: 0.6).fill()
+            NSBezierPath(roundedRect: NSRect(x: rect.midX + gap / 2, y: y, width: barW, height: barH),
+                         xRadius: 0.6, yRadius: 0.6).fill()
+            return true
+        }
+        image.isTemplate = true
         return image
     }
 

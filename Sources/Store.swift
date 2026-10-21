@@ -3,20 +3,36 @@ import Combine
 import AppKit
 
 final class Store: ObservableObject {
+    /// One store per process. The app delegate and App Intents both use it.
+    static let shared = Store()
+
     @Published var settings: AppSettings { didSet { save() } }
     @Published private(set) var days: [String: DayRecord]
     @Published var currentSiteID: String?
+    /// Seconds in the current visit, for the popover. Set by the tracker.
+    @Published var sessionSeconds: Int = 0
     /// Fetched logos for user-added sites, keyed by site id (domain).
     @Published private(set) var favicons: [String: NSImage] = [:]
     /// App icons from NSWorkspace, keyed by bundle id.
     @Published private(set) var appIcons: [String: NSImage] = [:]
+    /// Pause screens and what happened after each, newest last.
+    @Published private(set) var log: [FrictionEntry]
+    @Published private(set) var state: RuntimeState
     private var faviconFetchesInFlight = Set<String>()
 
     private let fileURL: URL
 
-    init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    /// ~/Library/Application Support/Lapse, or LAPSE_DATA_DIR when set (used for screenshots).
+    static let dataDirectory: URL = {
+        if let custom = ProcessInfo.processInfo.environment["LAPSE_DATA_DIR"], !custom.isEmpty {
+            return URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Lapse", isDirectory: true)
+    }()
+
+    init() {
+        let dir = Self.dataDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("data.json")
 
@@ -24,9 +40,13 @@ final class Store: ObservableObject {
            let p = try? JSONDecoder().decode(Persisted.self, from: data) {
             settings = p.settings
             days = p.days
+            log = p.log ?? []
+            state = p.state ?? RuntimeState()
         } else {
             settings = AppSettings()
             days = [:]
+            log = []
+            state = RuntimeState()
         }
     }
 
@@ -43,6 +63,13 @@ final class Store: ObservableObject {
         enabledSites.first { $0.matches(host: host) }
     }
 
+    /// The site this address counts for, if any. Feed-only sites count only on their feed.
+    func site(for url: URL) -> SiteConfig? {
+        guard let host = url.host, let site = site(for: host) else { return nil }
+        if site.countsFeedOnly && !FeedRules.isFeed(siteID: site.id, url: url) { return nil }
+        return site
+    }
+
     func app(for bundleID: String) -> AppConfig? {
         enabledApps.first { $0.id == bundleID }
     }
@@ -53,27 +80,136 @@ final class Store: ObservableObject {
         return id
     }
 
+    func seconds(for id: String) -> Int { today.seconds[id] ?? 0 }
+
+    // MARK: Pause
+
+    var isPaused: Bool { (state.pausedUntil ?? .distantPast) > Date() }
+    /// Nil when not paused. Date.distantFuture means until resumed.
+    var pausedUntil: Date? { isPaused ? state.pausedUntil : nil }
+
+    /// Nil pauses until resumed.
+    func pause(until date: Date?) {
+        state.pausedUntil = date ?? .distantFuture
+        save()
+    }
+
+    func pause(minutes: Int?) {
+        pause(until: minutes.map { Date().addingTimeInterval(TimeInterval($0 * 60)) })
+    }
+
+    func pauseUntilTomorrow() {
+        let start = Calendar.current.startOfDay(for: Date())
+        pause(until: Calendar.current.date(byAdding: .day, value: 1, to: start))
+    }
+
+    func resume() {
+        state.pausedUntil = nil
+        save()
+    }
+
     // MARK: Focus and limits
 
-    func isFocusHours(at date: Date = Date()) -> Bool {
+    enum FocusSource { case manual, filter, schedule }
+
+    /// The schedule from Settings, ignoring Shortcuts and Focus filters.
+    func scheduleSaysFocus(at date: Date = Date()) -> Bool {
         let focus = settings.focus
         guard focus.enabled else { return false }
         let cal = Calendar.current
-        let weekday = cal.component(.weekday, from: date) // 1 = Sunday
-        let index = weekday - 1
-        guard focus.days.indices.contains(index), focus.days[index] else { return false }
+        let index = cal.component(.weekday, from: date) - 1 // 1 = Sunday
         let minutes = cal.component(.hour, from: date) * 60 + cal.component(.minute, from: date)
         let start = focus.startMinutes
         let end = focus.endMinutes
-        if start == end { return true }
-        if start < end { return minutes >= start && minutes < end }
-        return minutes >= start || minutes < end
+        let dayOn = { (i: Int) -> Bool in focus.days.indices.contains(i) && focus.days[i] }
+        if start == end { return dayOn(index) }
+        if start < end { return dayOn(index) && minutes >= start && minutes < end }
+        // Overnight window: the part after midnight belongs to the day it started.
+        if minutes >= start { return dayOn(index) }
+        if minutes < end { return dayOn((index + 6) % 7) }
+        return false
+    }
+
+    private func liveOverride(at date: Date = Date()) -> FocusOverride? {
+        guard let o = state.focusOverride else { return nil }
+        if let until = o.until, until <= date { return nil }
+        return o
+    }
+
+    func isFocusHours(at date: Date = Date()) -> Bool {
+        if let o = liveOverride(at: date) { return o.on }
+        if state.focusFilter != nil { return true }
+        return scheduleSaysFocus(at: date)
+    }
+
+    /// Why focus hours are on right now, if they are.
+    var focusSource: FocusSource? {
+        if let o = liveOverride() { return o.on ? .manual : nil }
+        if state.focusFilter != nil { return .filter }
+        return scheduleSaysFocus() ? .schedule : nil
+    }
+
+    /// Stricter or block, for whatever turned focus hours on.
+    var focusMode: FocusMode {
+        if liveOverride()?.on != true, let mode = state.focusFilter { return mode }
+        return settings.focus.mode
+    }
+
+    /// When focus hours end, if Lapse can know.
+    func focusEnds() -> Date? {
+        switch focusSource {
+        case .manual: return liveOverride()?.until
+        case .filter, .none: return nil
+        case .schedule: return scheduleEnd(after: Date())
+        }
+    }
+
+    /// First minute after `date` when the schedule is off. Nil if it never is in the next week.
+    private func scheduleEnd(after date: Date) -> Date? {
+        let cal = Calendar.current
+        var t = cal.date(bySetting: .second, value: 0, of: date) ?? date
+        for _ in 0..<(7 * 24 * 60) {
+            t = t.addingTimeInterval(60)
+            if !scheduleSaysFocus(at: t) { return t }
+        }
+        return nil
+    }
+
+    /// Nil runs until stopped.
+    func startFocus(minutes: Int?) {
+        let until = minutes.map { Date().addingTimeInterval(TimeInterval(max(1, $0) * 60)) }
+        state.focusOverride = FocusOverride(on: true, until: until)
+        save()
+    }
+
+    func stopFocus() {
+        if state.focusFilter != nil {
+            // Stays off until that Focus ends.
+            state.focusOverride = FocusOverride(on: false, until: nil)
+        } else if scheduleSaysFocus() {
+            state.focusOverride = FocusOverride(on: false, until: scheduleEnd(after: Date()))
+        } else {
+            state.focusOverride = nil
+        }
+        save()
+    }
+
+    /// Called by the Focus filter. Nil when that Focus turns off.
+    func applyFocusFilter(_ mode: FocusMode?) {
+        state.focusFilter = mode
+        if mode != nil {
+            // A Focus turning on wins over an earlier manual stop.
+            if state.focusOverride?.on == false { state.focusOverride = nil }
+        } else if let o = state.focusOverride, !o.on, o.until == nil {
+            state.focusOverride = nil
+        }
+        save()
     }
 
     /// Overall cap in seconds for right now. Zero means block as soon as a tracked site or app is in front.
     func overallLimitSeconds(at date: Date = Date()) -> Int {
         if isFocusHours(at: date) {
-            if settings.focus.mode == .block { return 0 }
+            if focusMode == .block { return 0 }
             return max(0, settings.focus.dailyLimitMinutes) * 60
         }
         return max(0, settings.dailyLimitMinutes) * 60
@@ -82,7 +218,7 @@ final class Store: ObservableObject {
     /// Per-site or per-app cap in seconds, if one is set. Nil means only the overall limit applies.
     func itemLimitSeconds(for id: String, at date: Date = Date()) -> Int? {
         let focusOn = isFocusHours(at: date)
-        if focusOn && settings.focus.mode == .block { return 0 }
+        if focusOn && focusMode == .block { return 0 }
         let daily: Int?
         let focus: Int?
         if let site = settings.sites.first(where: { $0.id == id }) {
@@ -103,19 +239,31 @@ final class Store: ObservableObject {
         return nil
     }
 
+    var isOverOverall: Bool {
+        let limit = overallLimitSeconds()
+        return limit == 0 || todayTotal >= limit
+    }
+
+    /// Past the overall limit or this item's own limit.
+    func isOver(_ id: String) -> Bool {
+        if isOverOverall { return true }
+        if let cap = itemLimitSeconds(for: id) { return seconds(for: id) >= cap }
+        return false
+    }
+
     /// Why the soft block screen should be up, if it should. Only while a tracked site or app is in front.
     func softBlockReason(currentID: String?) -> SoftBlockReason? {
-        guard settings.softBlockEnabled else { return nil }
+        guard settings.softBlockEnabled, !isPaused else { return nil }
         let record = today
         if record.softBlockOff { return nil }
         if let until = record.snoozeUntil, until > Date() { return nil }
         guard let id = currentID else { return nil }
         let name = displayName(for: id)
-        if isFocusHours(), settings.focus.mode == .block {
-            return .focus(name: name)
+        if isFocusHours(), focusMode == .block {
+            return .focus(name: name, until: focusEnds())
         }
-        if let cap = itemLimitSeconds(for: id), (today.seconds[id] ?? 0) >= cap {
-            return .item(name: name, used: today.seconds[id] ?? 0, limit: cap)
+        if let cap = itemLimitSeconds(for: id), seconds(for: id) >= cap {
+            return .item(name: name, used: seconds(for: id), limit: cap)
         }
         let overall = overallLimitSeconds()
         if overall > 0, todayTotal >= overall {
@@ -139,6 +287,40 @@ final class Store: ObservableObject {
         save()
     }
 
+    // MARK: Friction
+
+    func friction(for id: String) -> FrictionSettings? {
+        if let site = settings.sites.first(where: { $0.id == id }) { return site.friction }
+        if let app = settings.apps.first(where: { $0.id == id }) { return app.friction }
+        return nil
+    }
+
+    /// The pause screen to show before this site or app, if one applies right now.
+    func frictionNeeded(for id: String) -> FrictionSettings? {
+        guard let f = friction(for: id), f.kind != .off else { return nil }
+        switch f.trigger {
+        case .always: return f
+        case .focusHours: return isFocusHours() ? f : nil
+        case .overLimit: return isOver(id) ? f : nil
+        }
+    }
+
+    func record(_ entry: FrictionEntry) {
+        log.append(entry)
+        save()
+    }
+
+    func clearLog() {
+        log.removeAll()
+        save()
+    }
+
+    func lastReason(for id: String) -> String? {
+        log.last(where: { $0.itemID == id && !($0.reason ?? "").isEmpty })?.reason
+    }
+
+    // MARK: Week
+
     struct WeekDay: Identifiable {
         let id: String       // day key
         let label: String
@@ -149,12 +331,12 @@ final class Store: ObservableObject {
     func lastSevenDays() -> [WeekDay] {
         let cal = Calendar.current
         let wf = DateFormatter()
-        wf.dateFormat = "EEE"
+        wf.setLocalizedDateFormatFromTemplate("EEE")
         return (0..<7).reversed().compactMap { offset -> WeekDay? in
             guard let date = cal.date(byAdding: .day, value: -offset, to: Date()) else { return nil }
             let key = DayKey.key(date)
             return WeekDay(id: key,
-                           label: offset == 0 ? "Today" : wf.string(from: date),
+                           label: wf.string(from: date),
                            seconds: days[key]?.total ?? 0,
                            isToday: offset == 0)
         }
@@ -181,6 +363,21 @@ final class Store: ObservableObject {
         if warning { rec.notifiedWarning = true } else { rec.notifiedLimit = true }
         days[key] = rec
         save()
+    }
+
+    /// Sets a per-site or per-app limit in minutes. Nil or 0 removes it. False if the id is unknown.
+    @discardableResult
+    func setItemLimit(_ id: String, minutes: Int?) -> Bool {
+        let value = (minutes ?? 0) > 0 ? minutes : nil
+        if let i = settings.sites.firstIndex(where: { $0.id == id }) {
+            settings.sites[i].dailyLimitMinutes = value
+            return true
+        }
+        if let i = settings.apps.firstIndex(where: { $0.id == id }) {
+            settings.apps[i].dailyLimitMinutes = value
+            return true
+        }
+        return false
     }
 
     func addSite(domain raw: String) {
@@ -276,14 +473,37 @@ final class Store: ObservableObject {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -keep, to: Date()) else { return }
         let cutKey = DayKey.key(cutoff)
         days = days.filter { $0.key >= cutKey }
+        log = log.filter { $0.date >= cutoff }
+        if let o = state.focusOverride, let until = o.until, until <= Date() { state.focusOverride = nil }
+        if let p = state.pausedUntil, p <= Date() { state.pausedUntil = nil }
+    }
+
+    /// Screenshots only. Scenes refuse to run without LAPSE_DATA_DIR, so this never replaces real data.
+    func replaceAll(settings: AppSettings, days: [String: DayRecord], log: [FrictionEntry], state: RuntimeState) {
+        self.days = days
+        self.log = log
+        self.state = state
+        self.settings = settings
     }
 
     func save() {
-        let p = Persisted(settings: settings, days: days)
+        let p = Persisted(settings: settings, days: days, log: log, state: state)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? enc.encode(p) {
             try? data.write(to: fileURL, options: .atomic)
         }
+        publishToday()
+    }
+
+    /// Today's total in the app's defaults, so a Shortcuts "Run Shell Script" action can read it:
+    /// defaults read com.acerothman.lapse todayMinutes
+    private func publishToday() {
+        guard ProcessInfo.processInfo.environment["LAPSE_DATA_DIR"] == nil,
+              Bundle.main.bundleIdentifier != nil else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(todayTotal / 60, forKey: "todayMinutes")
+        defaults.set(Fmt.long(todayTotal), forKey: "todayText")
+        defaults.set(limitSeconds / 60, forKey: "limitMinutes")
     }
 }

@@ -14,8 +14,11 @@ final class SoftBlockController {
 
     func sync() {
         let reason = store.softBlockReason(currentID: store.currentSiteID)
-        if let reason {
+        if let reason, let id = store.currentSiteID {
             model.reason = reason
+            model.icon = store.iconSource(for: id)
+            model.usedToday = store.seconds(for: id)
+            model.name = store.displayName(for: id)
             show()
         } else {
             hide()
@@ -61,6 +64,9 @@ final class SoftBlockController {
 
 final class SoftBlockModel: ObservableObject {
     @Published var reason: SoftBlockReason = .overall(used: 0, limit: 0)
+    @Published var icon: ItemIcon.Source?
+    @Published var name = ""
+    @Published var usedToday = 0
 }
 
 struct SoftBlockView: View {
@@ -71,36 +77,61 @@ struct SoftBlockView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.38)
-            VStack(spacing: 14) {
-                Image(systemName: "hourglass")
-                    .font(.system(size: 28, weight: .regular))
-                    .foregroundStyle(.secondary)
-                Text(model.reason.title)
-                    .font(.system(size: 22, weight: .semibold))
-                    .multilineTextAlignment(.center)
-                Text(model.reason.detail)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-                VStack(spacing: 8) {
-                    Button("Snooze 5 min", action: snooze5)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .keyboardShortcut(.defaultAction)
-                    Button("Snooze 15 min", action: snooze15)
-                        .controlSize(.large)
-                    Button("Turn off for today", action: turnOff)
-                        .controlSize(.large)
-                }
-                .padding(.top, 6)
-            }
-            .padding(28)
-            .frame(width: 380)
-            .background(Color(nsColor: .windowBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Color.black.opacity(0.4)
+            SoftBlockCard(model: model, snooze5: snooze5, snooze15: snooze15, turnOff: turnOff)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct SoftBlockCard: View {
+    @ObservedObject var model: SoftBlockModel
+    let snooze5: () -> Void
+    let snooze15: () -> Void
+    let turnOff: () -> Void
+
+    var body: some View {
+        OverlayCard(width: 380) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    if let icon = model.icon { ItemIcon(source: icon, size: 28) }
+                    Text(model.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                    Spacer()
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.faint)
+                }
+
+                Text(model.reason.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .padding(.top, 18)
+                Text(model.reason.detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+
+                VStack(spacing: 8) {
+                    Button(action: snooze5) {
+                        Text("Snooze 5 Minutes").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.large)
+                    HStack(spacing: 8) {
+                        Button(action: snooze15) {
+                            Text("Snooze 15 Minutes").frame(maxWidth: .infinity)
+                        }
+                        Button(action: turnOff) {
+                            Text("Off for Today").frame(maxWidth: .infinity)
+                        }
+                    }
+                    .controlSize(.large)
+                }
+                .padding(.top, 22)
+            }
+        }
     }
 }
