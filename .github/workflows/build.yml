@@ -18,8 +18,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Test
+        run: scripts/test.sh
+
       - name: Build
         run: ./build.sh --no-open
+
+      - name: Check the bundle
+        run: |
+          test -d build/Lapse.app/Contents/Resources/Metadata.appintents
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Lapse.app/Contents/Info.plist
+          codesign --verify --verbose=1 build/Lapse.app
 
       - name: Zip app
         id: zip

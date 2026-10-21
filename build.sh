@@ -3,6 +3,8 @@
 # With no arguments, installs to ~/Applications and opens the app.
 # Pass --no-open to stop after the signed bundle in build/ (no install, no launch).
 # Requires macOS 13+ and the Command Line Tools (xcode-select --install).
+# With full Xcode selected, it also writes the App Intents metadata that Shortcuts
+# and Focus filters need. Without Xcode the app still builds, minus those.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -12,23 +14,71 @@ BUNDLE="$BUILD/$APP.app"
 DEST="$HOME/Applications"
 ARCH="$(uname -m)"          # arm64 or x86_64
 TARGET="$ARCH-apple-macos13.0"
+SDK="$(xcrun --show-sdk-path --sdk macosx)"
 
 echo "→ Cleaning"
 rm -rf "$BUILD"
-mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
+mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources" "$BUILD/intents"
+
+# App Intents: the compiler records constant values for these protocols, and Xcode's
+# extractor turns them into Metadata.appintents inside the bundle.
+cat > "$BUILD/intents/protocols.json" <<'JSON'
+["AnyResolverProviding", "AppEntity", "AppEnum", "AppIntent", "AppIntentsPackage", "AppShortcutProviding",
+ "AppShortcutsProvider", "DynamicOptionsProvider", "EntityQuery", "IntentValueQuery", "Resolver",
+ "TransientEntity", "_AssistantIntentsProvider", "_GenerativeFunctionExtractable", "_IntentValueRepresentable"]
+JSON
 
 echo "→ Compiling ($TARGET)"
-swiftc -O -swift-version 5 -parse-as-library \
+swiftc -O -wmo -swift-version 5 -parse-as-library \
+  -module-name "$APP" \
   -target "$TARGET" \
-  -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-  -framework AppKit -framework SwiftUI -framework Charts \
+  -sdk "$SDK" \
+  -framework AppKit -framework SwiftUI -framework Charts -framework AppIntents \
   -framework ServiceManagement -framework UserNotifications \
+  -emit-const-values-path "$BUILD/intents/$APP.swiftconstvalues" \
+  -Xfrontend -const-gather-protocols-file -Xfrontend "$BUILD/intents/protocols.json" \
   Sources/*.swift \
   -o "$BUNDLE/Contents/MacOS/$APP"
 
 echo "→ Bundling resources"
 cp Info.plist "$BUNDLE/Contents/Info.plist"
 cp Resources/Icons/*.png "$BUNDLE/Contents/Resources/"
+
+if EXTRACTOR="$(xcrun --find appintentsmetadataprocessor 2>/dev/null)"; then
+  echo "→ Extracting App Intents metadata"
+  for f in Sources/*.swift; do echo "$PWD/$f"; done > "$BUILD/intents/sources.txt"
+  echo "$PWD/$BUILD/intents/$APP.swiftconstvalues" > "$BUILD/intents/constvalues.txt"
+  XCODE_BUILD="$(xcodebuild -version 2>/dev/null | awk '/Build version/ {print $3}')"
+  # Older Xcode versions lack some flags. Pass only the ones this extractor knows.
+  HELP="$("$EXTRACTOR" --help 2>&1 || true)"
+  EXTRA=()
+  for flag in --force --compile-time-extraction --deployment-aware-processing --no-app-shortcuts-localization; do
+    if grep -q -- "$flag" <<<"$HELP"; then EXTRA+=("$flag"); fi
+  done
+  "$EXTRACTOR" \
+    --toolchain-dir "$(dirname "$(dirname "$(dirname "$EXTRACTOR")")")" \
+    --module-name "$APP" \
+    --sdk-root "$SDK" \
+    --xcode-version "${XCODE_BUILD:-unknown}" \
+    --platform-family macOS \
+    --deployment-target 13.0 \
+    --bundle-identifier "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' Info.plist)" \
+    --output "$BUNDLE/Contents/Resources" \
+    --target-triple "$TARGET" \
+    --binary-file "$BUNDLE/Contents/MacOS/$APP" \
+    --dependency-file "$BUILD/intents/deps.d" \
+    --stringsdata-file "$BUILD/intents/ExtractedAppShortcutsMetadata.stringsdata" \
+    --source-file-list "$BUILD/intents/sources.txt" \
+    --swift-const-vals-list "$BUILD/intents/constvalues.txt" \
+    ${EXTRA[@]+"${EXTRA[@]}"} \
+    2>&1 | grep -v 'appintentsmetadataprocessor\[' || true
+  if [[ ! -d "$BUNDLE/Contents/Resources/Metadata.appintents" ]]; then
+    echo "error: App Intents metadata was not written" >&2
+    exit 1
+  fi
+else
+  echo "→ Skipping App Intents metadata (needs Xcode). Shortcuts and Focus filters won't see Lapse."
+fi
 
 echo "→ Generating app icon"
 ICONSET="$BUILD/AppIcon.iconset"

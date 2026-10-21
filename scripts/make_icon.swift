@@ -1,4 +1,4 @@
-// Renders a 1024x1024 app icon: SF Symbol hourglass on a system-blue squircle.
+// Renders a 1024x1024 app icon: the menu bar ring, two thirds full, in white on a graphite squircle.
 // Usage: swift scripts/make_icon.swift out.png
 import AppKit
 
@@ -17,27 +17,46 @@ let shape = NSBezierPath(roundedRect: body, xRadius: 185, yRadius: 185)
 
 NSGraphicsContext.saveGraphicsState()
 let shadow = NSShadow()
-shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
+shadow.shadowColor = NSColor.black.withAlphaComponent(0.28)
 shadow.shadowOffset = NSSize(width: 0, height: -12)
 shadow.shadowBlurRadius = 24
 shadow.set()
-NSColor(srgbRed: 0.0, green: 0.48, blue: 1.0, alpha: 1).setFill()
+NSColor(srgbRed: 0.12, green: 0.12, blue: 0.13, alpha: 1).setFill()
 shape.fill()
 NSGraphicsContext.restoreGraphicsState()
 
-// Subtle top-to-bottom light, like Apple's own icons
-NSGradient(starting: NSColor(srgbRed: 0.30, green: 0.64, blue: 1.0, alpha: 1),
-           ending: NSColor(srgbRed: 0.0, green: 0.40, blue: 0.92, alpha: 1))?
+// A faint neutral falloff, darker at the bottom.
+NSGradient(starting: NSColor(srgbRed: 0.19, green: 0.19, blue: 0.20, alpha: 1),
+           ending: NSColor(srgbRed: 0.10, green: 0.10, blue: 0.11, alpha: 1))?
     .draw(in: shape, angle: -90)
 
-let config = NSImage.SymbolConfiguration(pointSize: 460, weight: .semibold)
-    .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
-if let sym = NSImage(systemSymbolName: "hourglass", accessibilityDescription: nil)?
-    .withSymbolConfiguration(config) {
-    let s = sym.size
-    sym.draw(in: NSRect(x: (Double(px) - s.width) / 2, y: (Double(px) - s.height) / 2,
-                        width: s.width, height: s.height))
-}
+// Thin light edge along the top, like machined metal.
+NSGraphicsContext.saveGraphicsState()
+shape.addClip()
+let edge = NSBezierPath(roundedRect: body.insetBy(dx: 2, dy: 2), xRadius: 183, yRadius: 183)
+edge.lineWidth = 3
+NSColor.white.withAlphaComponent(0.07).setStroke()
+edge.stroke()
+NSGraphicsContext.restoreGraphicsState()
+
+// The ring, with the same proportions as the 13 pt menu bar glyph.
+let center = NSPoint(x: 512, y: 512)
+let outer: CGFloat = 250
+let band = outer * 0.23
+let ring = NSBezierPath()
+ring.appendArc(withCenter: center, radius: outer - band / 2, startAngle: 0, endAngle: 360)
+ring.lineWidth = band
+NSColor.white.setStroke()
+ring.stroke()
+
+let fraction: CGFloat = 0.68
+let pie = NSBezierPath()
+pie.move(to: center)
+pie.appendArc(withCenter: center, radius: outer * 0.6, startAngle: 90, endAngle: 90 - 360 * fraction, clockwise: true)
+pie.close()
+NSColor.white.setFill()
+pie.fill()
+
 NSGraphicsContext.restoreGraphicsState()
 
 guard let png = rep.representation(using: .png, properties: [:]) else { exit(1) }

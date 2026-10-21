@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0
+
+- Feed only. Count only the feed on X, Reddit, YouTube, Instagram, TikTok, Facebook, LinkedIn and Threads. DMs, posting, notifications and settings don't count. X is set this way, including after the update.
+- A pause before a site or app opens: a countdown, or a box where you type why. Set per site, with the length and when it shows up (every time, during focus hours, or past a limit).
+- A log of every pause screen and reason, in Settings.
+- Pause tracking for a while, from the popover, the menu or a link.
+- Start and end focus hours by hand, or from Shortcuts. Focus hours can follow a macOS Focus.
+- lapse:// links for Shortcuts: start or end focus hours, pause, resume, change a limit. Native Shortcuts actions and a Focus filter for builds signed by a developer team.
+- A new look for the popover, the welcome window, Settings and the limit screen. Settings has tabs now.
+- A new app icon.
+- The X app is matched by its real bundle id, com.atebits.Tweetie2. Threads counts on threads.com too.
+- Focus hours that run past midnight now count the early hours toward the day they started.
+
 ## 1.1.0
 
 - Track Mac apps you pick. Time counts while the app is in front, and the icon comes from the app.
