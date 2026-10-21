@@ -31,17 +31,23 @@ compile_app() {
     Sources/*.swift \
     -o "$BUNDLE/Contents/MacOS/$APP"
 }
-set +e
-compile_app \
+# Const extraction only walks the primary file. Intents.swift is that file.
+OTHERS=()
+for f in Sources/*.swift; do
+  [[ "$f" == Sources/Intents.swift ]] && continue
+  OTHERS+=("$f")
+done
+echo "→ Extracting App Intents metadata inputs"
+swiftc -typecheck -swift-version 5 -parse-as-library \
+  -module-name Lapse \
+  -target "$TARGET" \
+  -sdk "$SDK" \
   -Xfrontend -const-gather-protocols-file -Xfrontend "scripts/appintents-protocols.json" \
-  -Xfrontend -emit-const-values-path -Xfrontend "$CONST"
-status=$?
-set -e
-if [[ $status -ne 0 ]]; then
-  echo "const extraction unavailable, compiling without it"
-  rm -f "$CONST"
-fi
-# Ship an optimized binary. Const metadata comes from the compile above.
+  -Xfrontend -emit-const-values-path -Xfrontend "$CONST" \
+  -framework AppKit -framework SwiftUI -framework Charts \
+  -framework ServiceManagement -framework UserNotifications -framework AppIntents \
+  -primary-file Sources/Intents.swift \
+  "${OTHERS[@]}"
 compile_app -O
 
 echo "→ Bundling resources"
