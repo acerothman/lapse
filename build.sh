@@ -38,7 +38,7 @@ for f in Sources/*.swift; do
   OTHERS+=("$f")
 done
 echo "→ Extracting App Intents metadata inputs"
-swiftc -typecheck -swift-version 5 -parse-as-library \
+swiftc -c -swift-version 5 -parse-as-library \
   -module-name Lapse \
   -target "$TARGET" \
   -sdk "$SDK" \
@@ -47,7 +47,8 @@ swiftc -typecheck -swift-version 5 -parse-as-library \
   -framework AppKit -framework SwiftUI -framework Charts \
   -framework ServiceManagement -framework UserNotifications -framework AppIntents \
   -primary-file Sources/Intents.swift \
-  "${OTHERS[@]}"
+  "${OTHERS[@]}" \
+  -o "$BUILD/Intents.o"
 compile_app -O
 
 echo "→ Bundling resources"
