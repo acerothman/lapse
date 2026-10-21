@@ -1,0 +1,11 @@
+[
+  "AppIntents.AppIntent",
+  "AppIntents.AppShortcutsProvider",
+  "AppIntents.AppEntity",
+  "AppIntents.TransientAppEntity",
+  "AppIntents.AppEnum",
+  "AppIntents.AppUnionValue",
+  "AppIntents.SetFocusFilterIntent",
+  "AppIntents.AppIntent",
+  "SetFocusFilterIntent"
+]

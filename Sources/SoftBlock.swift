@@ -13,6 +13,10 @@ final class SoftBlockController {
     }
 
     func sync() {
+        if store.frictionRequest != nil || store.endEarlyVisible || store.blockTarget != nil || store.sessionLocksApps {
+            hide()
+            return
+        }
         let reason = store.softBlockReason(currentID: store.currentSiteID)
         if let reason {
             model.reason = reason
@@ -71,13 +75,13 @@ struct SoftBlockView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.38)
-            VStack(spacing: 14) {
+            Color.primary.opacity(0.32)
+            VStack(spacing: 16) {
                 Image(systemName: "hourglass")
-                    .font(.system(size: 28, weight: .regular))
+                    .font(.system(size: 22, weight: .regular))
                     .foregroundStyle(.secondary)
                 Text(model.reason.title)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                     .multilineTextAlignment(.center)
                 Text(model.reason.detail)
                     .font(.system(size: 13))
@@ -94,12 +98,12 @@ struct SoftBlockView: View {
                     Button("Turn off for today", action: turnOff)
                         .controlSize(.large)
                 }
-                .padding(.top, 6)
+                .padding(.top, 4)
             }
             .padding(28)
             .frame(width: 380)
             .background(Color(nsColor: .windowBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

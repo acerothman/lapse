@@ -131,6 +131,33 @@ enum StatusLabel {
         }
     }
 
+    // MARK: Pomodoro menu bar
+
+    /// Idle menu bar mark. Template, so the system colors it with the menu bar.
+    static func timerIcon() -> NSImage {
+        let base = NSImage(systemSymbolName: "timer", accessibilityDescription: "Lapse")
+            ?? NSImage(size: NSSize(width: 16, height: 16))
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let image = base.withSymbolConfiguration(config) ?? base
+        image.isTemplate = true
+        return image
+    }
+
+    /// Small status dot. Not a template: the countdown text stays the system menu bar color.
+    static func statusDot(onBreak: Bool) -> NSImage {
+        let size = NSSize(width: 16, height: 18)
+        let color = onBreak
+            ? NSColor(srgbRed: 52.0 / 255, green: 199.0 / 255, blue: 89.0 / 255, alpha: 1)
+            : NSColor(srgbRed: 1, green: 90.0 / 255, blue: 54.0 / 255, alpha: 1)
+        let image = NSImage(size: size, flipped: false) { _ in
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 4, y: 5, width: 8, height: 8)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
     /// True when at least a quarter of the pixels are transparent, i.e. the logo has a shape
     /// that still reads as a silhouette. Opaque square favicons stay full color.
     private static func hasTransparency(_ image: NSImage) -> Bool {
