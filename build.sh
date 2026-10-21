@@ -37,18 +37,34 @@ for f in Sources/*.swift; do
   [[ "$f" == Sources/Intents.swift ]] && continue
   OTHERS+=("$f")
 done
+# -primary-file is a frontend flag (NoDriverOption). swiftc drops it and the
+# whole-module compile then writes an empty const-values file, so Shortcuts
+# metadata never registers. Invoke swift-frontend directly.
 echo "→ Extracting App Intents metadata inputs"
-swiftc -c -swift-version 5 -parse-as-library \
+FRONTEND="$(xcrun --find swift-frontend)"
+RESOURCE_DIR="$(cd "$(dirname "$(xcrun --find swiftc)")/../lib/swift" && pwd)"
+mkdir -p "$BUILD/ModuleCache"
+"$FRONTEND" -frontend -typecheck \
+  -swift-version 5 \
+  -parse-as-library \
+  -enable-objc-interop \
   -module-name Lapse \
-  -target "$TARGET" \
+  -target "${ARCH}-apple-macosx13.0" \
   -sdk "$SDK" \
-  -Xfrontend -const-gather-protocols-file -Xfrontend "scripts/appintents-protocols.json" \
-  -Xfrontend -emit-const-values-path -Xfrontend "$CONST" \
-  -framework AppKit -framework SwiftUI -framework Charts \
-  -framework ServiceManagement -framework UserNotifications -framework AppIntents \
+  -F "$SDK/System/Library/Frameworks" \
+  -resource-dir "$RESOURCE_DIR" \
+  -module-cache-path "$BUILD/ModuleCache" \
+  -const-gather-protocols-file "scripts/appintents-protocols.json" \
+  -emit-const-values-path "$CONST" \
   -primary-file Sources/Intents.swift \
-  "${OTHERS[@]}" \
-  -o "$BUILD/Intents.o"
+  "${OTHERS[@]}"
+if ! grep -q 'AppIntent' "$CONST"; then
+  echo "App Intents const extraction did not see the intent types" >&2
+  wc -c "$CONST" >&2 || true
+  head -c 2000 "$CONST" >&2 || true
+  echo >&2
+  exit 1
+fi
 compile_app -O
 
 echo "→ Bundling resources"
